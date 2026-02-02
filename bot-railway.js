@@ -170,7 +170,7 @@ const orderWizard = new Scenes.WizardScene(
                 `✅ <b>Заявка принята!</b>\nМенеджер свяжется с вами в ближайшее время для уточнения деталей.`,
                 {
                     parse_mode: 'HTML',
-                    ...Markup.removeKeyboard()
+                    reply_markup: Markup.removeKeyboard()
                 }
             );
 
@@ -187,7 +187,7 @@ const orderWizard = new Scenes.WizardScene(
 
 // Функция отмены
 const cancel = async (ctx) => {
-    await ctx.reply('❌ Заявка отменена.', { ...Markup.removeKeyboard() });
+    await ctx.reply('❌ Заявка отменена.', { reply_markup: Markup.removeKeyboard() });
     await ctx.reply('Главное меню:', getMainMenu());
     return ctx.scene.leave();
 };
@@ -230,7 +230,7 @@ bot.start((ctx) => {
             `Делаем качественный ремонт и устанавливаем потолки в Улан-Удэ.\n\n` +
             `👇 <b>Выберите, что вас интересует:</b>`,
             parse_mode: 'HTML',
-            ...getMainMenu()
+            reply_markup: getMainMenu()
         }
     );
 });
@@ -373,7 +373,7 @@ bot.on('text', async (ctx) => {
 
         if (!originalText) return;
 
-        // Ищем ID клиента в хэштеге #id123456
+        // Ищем ID клиента в хештеге #id123456
         const match = originalText.match(/#id(\d+)/);
 
         if (match) {
