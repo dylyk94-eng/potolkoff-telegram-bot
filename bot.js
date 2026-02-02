@@ -646,7 +646,7 @@ bot.use(async (ctx, next) => {
     // Проверяем, это ли первый раз когда пользователь пишет боту
     if (!ctx.session.welcomed && ctx.message && !ctx.message.text.startsWith('/')) {
         ctx.session.welcomed = true;
-        await ctx.replyWithMarkdown(welcomeMessage, startMenu);
+        ctx.reply(welcomeMessage, startMenu);
         return;
     }
     return next();
@@ -717,7 +717,7 @@ const startMenu = {
 // Запуск бота
 bot.start((ctx) => {
     ctx.session.welcomed = true;
-    ctx.replyWithMarkdown(welcomeMessage, startMenu);
+    ctx.reply(welcomeMessage, startMenu);
 });
 
 // Обработка кнопки НАЧАТЬ
