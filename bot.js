@@ -411,7 +411,7 @@ const mainMenu = {
                 { text: '📞 Контакты', callback_data: 'contacts' }
             ],
             [
-                { text: '📏 Заказать бесплатный замер', callback_data: 'request_call' },
+                { text: '📏 Заказать замер', callback_data: 'request_call' },
                 { text: '🏗️ Портфолио', callback_data: 'portfolio' }
             ]
         ]
@@ -553,7 +553,7 @@ const calculatorWizard = new Scenes.WizardScene(
                         inline_keyboard: [
                             [
                                 { text: '🎯 Оформить заявку', callback_data: 'consultation' },
-                                { text: '📏 Заказать бесплатный замер', callback_data: 'request_call' }
+                                { text: '📏 Заказать замер', callback_data: 'request_call' }
                             ],
                             [
                                 { text: '📊 Все цены', callback_data: 'prices' },
@@ -921,7 +921,7 @@ bot.action('prices', (ctx) => {
 ─────────────────────
 
 🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
-Используйте калькулятор или закажите бесплатный замер!
+Используйте калькулятор или закажите замер!
     `;
 
     ctx.editMessageText(pricesMessage, {
@@ -929,7 +929,7 @@ bot.action('prices', (ctx) => {
             inline_keyboard: [
                 [
                     { text: '📐 Рассчитать', callback_data: 'calculator' },
-                    { text: '📏 Заказать бесплатный замер', callback_data: 'request_call' }
+                    { text: '📏 Заказать замер', callback_data: 'request_call' }
                 ],
                 [
                     { text: '◀️ Назад', callback_data: 'main_menu' }
