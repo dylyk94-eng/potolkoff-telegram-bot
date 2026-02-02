@@ -1,0 +1,7 @@
+feat: added request form and admin notifications
+
+- Added 6-step request wizard for clients
+- Implemented admin notifications via Telegram
+- Added status management (new/in progress/done)
+- Client notifications on status changes
+- Created .gitignore for deployment
