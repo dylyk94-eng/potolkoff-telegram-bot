@@ -390,86 +390,20 @@ const companyInfo = {
         { name: 'Тканевые потолки', price: 'от 2500 ₽/м²' },
         { name: 'Ремонт "под ключ"', price: 'по запросу' },
         { name: 'Дизайн интерьеров', price: 'по запросу' }
-    ],
-    features: [
-        'Сертифицированные мастера и дизайнеры',
-        'Гарантия 5 лет на все работы',
-        'Бесплатный выезд замерщика',
-        'Индивидуальный подход к каждому клиенту',
-        'Комплексный ремонт "под ключ"'
     ]
 };
 
-// Главное меню
+// Главное меню (упрощённое)
 const mainMenu = {
     reply_markup: {
         inline_keyboard: [
             [
-                { text: '🏠 Потолки', callback_data: 'ceiling_menu' },
-                { text: '📐 Калькулятор', callback_data: 'calculator' }
-            ],
-            [
-                { text: '💰 Цены', callback_data: 'prices' },
-                { text: '📞 Контакты', callback_data: 'contacts' }
-            ],
-            [
                 { text: '📏 Заказать замер', callback_data: 'request_call' },
+                { text: '💰 Цены', callback_data: 'prices' }
+            ],
+            [
+                { text: '📞 Контакты', callback_data: 'contacts' },
                 { text: '🏗️ Портфолио', callback_data: 'portfolio' }
-            ]
-        ]
-    }
-};
-
-// Меню потолков
-const ceilingMenu = {
-    reply_markup: {
-        inline_keyboard: [
-            [
-                { text: 'Натяжные потолки', callback_data: 'service_ceiling' },
-                { text: 'Многоуровневые', callback_data: 'service_multi' }
-            ],
-            [
-                { text: '3D-потолки', callback_data: 'service_3d' },
-                { text: 'С фотообоями', callback_data: 'service_photowall' }
-            ],
-            [
-                { text: 'Тканевые', callback_data: 'service_fabric' },
-                { text: 'Сатиновые', callback_data: 'service_satin' }
-            ],
-            [
-                { text: 'Глянцевые', callback_data: 'service_glossy' },
-                { text: 'Матовые', callback_data: 'service_matte' }
-            ],
-            [
-                { text: '◀️ Назад', callback_data: 'main_menu' }
-            ]
-        ]
-    }
-};
-
-// Меню услуг
-const servicesMenu = {
-    reply_markup: {
-        inline_keyboard: [
-            [
-                { text: 'Натяжные потолки', callback_data: 'service_ceiling' },
-                { text: 'Многоуровневые', callback_data: 'service_multi' }
-            ],
-            [
-                { text: '3D-потолки', callback_data: 'service_3d' },
-                { text: 'С фотообоями', callback_data: 'service_photowall' }
-            ],
-            [
-                { text: 'Тканевые', callback_data: 'service_fabric' },
-                { text: 'Сатиновые', callback_data: 'service_satin' }
-            ],
-            [
-                { text: 'Глянцевые', callback_data: 'service_glossy' },
-                { text: 'Матовые', callback_data: 'service_matte' }
-            ],
-            [
-                { text: '📐 Калькулятор', callback_data: 'calculator' },
-                { text: '◀️ Назад', callback_data: 'main_menu' }
             ]
         ]
     }
@@ -933,7 +867,7 @@ bot.on('text', (ctx) => {
                   'Я могу рассказать вам о наших услугах и помочь связаться с нами.',
                   mainMenu);
     } else if (text.includes('услуг') || text.includes('работ') || text.includes('цена')) {
-        ctx.reply('Вот список наших основных услуг:', servicesMenu);
+        ctx.reply('Вот список наших основных услуг:', mainMenu);
     } else if (text.includes('контакт') || text.includes('телефон') || text.includes('связ')) {
         ctx.reply('Наши контактные данные:', contactsMenu);
     } else {
@@ -946,21 +880,7 @@ bot.action('main_menu', (ctx) => {
     ctx.editMessageText(welcomeMessage, mainMenu);
 });
 
-// Меню потолков
-bot.action('ceiling_menu', (ctx) => {
-    const ceilingMessage = `
-🏠 Виды потолков
-
-─────────────────────
-
-Выберите тип потолка, чтобы узнать подробнее:
-
-💡 Нажмите на кнопку ниже ⬇️
-    `;
-    ctx.editMessageText(ceilingMessage, ceilingMenu);
-});
-
-// Калькулятор стоимости
+// Калькулятор стоимости (не используется в главном меню)
 bot.action('calculator', (ctx) => {
     ctx.scene.enter('calculator_wizard');
 });
@@ -988,17 +908,14 @@ bot.action('prices', (ctx) => {
 ─────────────────────
 
 🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
-Используйте калькулятор или закажите замер!
+Оформите заявку для получения точного расчёта!
     `;
 
     ctx.editMessageText(pricesMessage, {
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: '📐 Рассчитать', callback_data: 'calculator' },
-                    { text: '📏 Заказать замер', callback_data: 'request_call' }
-                ],
-                [
+                    { text: '📏 Заказать замер', callback_data: 'request_call' },
                     { text: '◀️ Назад', callback_data: 'main_menu' }
                 ]
             ]
@@ -1006,7 +923,7 @@ bot.action('prices', (ctx) => {
     });
 });
 
-// Заказать звонок
+// Заказать замер
 bot.action('request_call', (ctx) => {
     ctx.answerCbQuery();
     ctx.scene.enter('request_wizard');
@@ -1129,98 +1046,6 @@ ${phoneNumber}
             ]
         }
     });
-});
-
-bot.action('services', (ctx) => {
-    let servicesMessage = `
-💼 НАШИ УСЛУГИ
-
-─────────────────────
-    `;
-
-    companyInfo.services.forEach((service, index) => {
-        servicesMessage += `${index + 1}. <b>${service.name}</b>\n   💵 ${service.price}\n\n`;
-    });
-
-    servicesMessage += `
-─────────────────────
-
-💡 ХОТИТЕ УЗНАТЬ БОЛЬШЕ?
-Нажмите на услугу в меню ниже ⬇️
-    `;
-
-    ctx.editMessageText(servicesMessage, servicesMenu);
-});
-
-bot.action('about', (ctx) => {
-    let aboutMessage = `
-ℹ️ О КОМПАНИИ ${companyInfo.name}
-
-─────────────────────
-
-${companyInfo.fullName}
-
-"${companyInfo.slogan}"
-
-─────────────────────
-
-🏙️ РАБОТАЕМ В:
-Улан-Удэ и Бурятии
-
-👷 КОМАНДА ПРОФЕССИОНАЛОВ:
-Создаем уют и комфорт в домах уже ${companyInfo.stats.experience}+ лет!
-
-─────────────────────
-
-✨ НАШИ ПРЕИМУЩЕСТВА:
-    `;
-    companyInfo.features.forEach(feature => {
-        aboutMessage += `✅ ${feature}\n`;
-    });
-
-    aboutMessage += `
-─────────────────────
-
-📞 СВЯЖИТЕСЬ С НАМИ:
-${companyInfo.contacts.phone}
-${companyInfo.contacts.telegram}
-    `;
-
-    ctx.editMessageText(aboutMessage, mainMenu);
-});
-
-bot.action('stats', (ctx) => {
-    const statsMessage = `
-📊 НАША СТАТИСТИКА
-
-─────────────────────
-
-🏠 Объектов выполнено:
-${companyInfo.stats.objects}
-
-👥 Довольных клиентов:
-${companyInfo.stats.clients}+
-
-⏰ Лет на рынке:
-${companyInfo.stats.experience}
-
-⭐ Уровень удовлетворенности:
-${companyInfo.stats.satisfaction}
-
-─────────────────────
-
-💡 ЧТО ЭТО ЗНАЧИТ:
-• Мы знаем своё дело
-• Клиенты доверяют нам
-• Качество гарантируем
-• Репутация важна
-
-─────────────────────
-
-🎁 Выбираете нас — выбираете качество!
-    `;
-
-    ctx.editMessageText(statsMessage, mainMenu);
 });
 
 bot.action('consultation', (ctx) => {
