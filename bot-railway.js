@@ -925,6 +925,12 @@ bot.on('text', async (ctx) => {
 // 10. ЗАПУСК СЕРВЕРА (WEBHOOK ДЛЯ RAILWAY)
 // ============================================
 
+// Команда /ping для проверки работы бота
+bot.command('ping', (ctx) => {
+    const now = new Date().toISOString();
+    ctx.reply(`🏓 Пинг бота успешно!\n\n🕐 Время сервера: ${now}\n🚀 Статус: Бот работает через Webhook (Railway)`);
+});
+
 app.use(express.json());
 app.use(bot.webhookCallback('/webhook'));
 
