@@ -63,7 +63,7 @@ async function notifyAdmin(ctx, request) {
     }
 
     const createdAt = new Date(request.createdAt).toLocaleString('ru-RU');
-    
+
     const message = `
 🆕 НОВАЯ ЗАЯВКА #${request.id}
 
@@ -209,7 +209,7 @@ const requestScene = new Scenes.WizardScene(
             const action = ctx.callbackQuery.data.split('_')[2];
             const now = new Date();
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            
+
             switch(action) {
                 case 'today':
                     ctx.session.request.datetime = `Сегодня, ${now.toLocaleDateString('ru-RU', options)}`;
@@ -268,7 +268,7 @@ const requestScene = new Scenes.WizardScene(
             if (ctx.message.text.toLowerCase() !== 'пропустить') {
                 ctx.session.request.comment = ctx.message.text.trim();
             }
-            
+
             const confirmKeyboard = {
                 reply_markup: {
                     inline_keyboard: [
@@ -282,7 +282,7 @@ const requestScene = new Scenes.WizardScene(
                     ]
                 }
             };
-            
+
             let summary = `
 📋 Проверьте данные заявки:
 
@@ -293,7 +293,7 @@ const requestScene = new Scenes.WizardScene(
 👤 Контакты: ${ctx.session.request.contacts}
 💬 Комментарий: ${ctx.session.request.comment || 'Нет'}
             `;
-            
+
             ctx.reply(summary, confirmKeyboard);
         }
     }
@@ -303,16 +303,16 @@ const requestScene = new Scenes.WizardScene(
 requestScene.action('req_confirm', async (ctx) => {
     const request = createRequest(ctx);
     ctx.answerCbQuery();
-    
+
     ctx.reply('✅ Заявка успешно создана!\n\n' +
               'Номер заявки: #' + request.id + '\n' +
               'Статус: новая\n\n' +
               'Мы свяжемся с вами в ближайшее время для уточнения деталей.\n\n' +
               'Спасибо за обращение!');
-    
+
     // Отправляем уведомление админу
     await notifyAdmin(ctx, request);
-    
+
     ctx.scene.leave();
 });
 
@@ -342,7 +342,7 @@ requestScene.action(/^req_service_\d+/, (ctx) => {
     ];
     ctx.session.request = ctx.session.request || {};
     ctx.session.request.service = services[serviceIndex];
-    
+
     ctx.editMessageText(`📋 Шаг 2 из 6\n\nВыбранная услуга: ${ctx.session.request.service}\n\nВведите площадь помещения (в м²):`);
     return ctx.wizard.selectStep(2);
 });
@@ -548,28 +548,39 @@ const calculatorWizard = new Scenes.WizardScene(
                 };
 
                 const resultMessage = `
-💰 Расчёт стоимости
-
-🏠 Тип потолка: ${ctx.session.calc.type.name}
-📐 Площадь: ${area} м²
-💵 Базовая цена: ${ctx.session.calc.type.price} ₽/м²
+💰 РАСЧЁТ СТОИМОСТИ
 
 ─────────────────────
 
-📊 Примерная стоимость:
+🏠 Тип потолка:
+${ctx.session.calc.type.name}
+
+📐 Площадь помещения:
+${area} м²
+
+💵 Цена за м²:
+${ctx.session.calc.type.price} ₽
+
+─────────────────────
+
+📊 ПРИМЕРНАЯ СТОИМОСТЬ:
 ${Math.round(minPrice).toLocaleString('ru-RU')} - ${Math.round(maxPrice).toLocaleString('ru-RU')} ₽
 
-💡 Стоимость включает:
-• Материал потолка
-• Установка и монтаж
-• Базовую люстру
+─────────────────────
 
-🔧 Дополнительно может оплачиваться:
-• Подсветка
-• Угловые профили
-• Дополнительные светильники
+💡 В стоимость ВХОДИТ:
+✅ Материал потолка
+✅ Установка и монтаж
+✅ Базовая люстра
 
-Хотите получить точный расчёт?
+🔧 ОПЛАЧИВАЕТСЯ ОТДЕЛЬНО:
+❗ Подсветка LED
+❗ Угловые профили
+❗ Дополнительные светильники
+
+─────────────────────
+
+🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
 Закажите бесплатный замер!
                 `;
 
@@ -621,17 +632,21 @@ const welcomeMessage = `
 ${companyInfo.fullName}
 "${companyInfo.slogan}"
 
-Мы специализируемся на:
+─────────────────────
+
+✨ Мы специализируемся на:
 • Натяжных потолках премиум-класса
-• Многоуровневых конструкциях
+• Многоуровневых конструкциях с подсветкой
 • Ремонте "под ключ"
 • Дизайне интерьеров
+
+─────────────────────
 
 📐 Рассчитайте стоимость через калькулятор
 📞 Закажите бесплатный замер
 🏗️ Посмотрите наши работы
 
-Нажмите кнопки ниже для навигации:
+👇 Выберите интересующий раздел:
 `;
 
 // Запуск бота
@@ -659,12 +674,12 @@ bot.command('request', (ctx) => {
 bot.command('myrequests', (ctx) => {
     const requests = loadRequests();
     const userRequests = requests.filter(r => r.userId === ctx.from.id);
-    
+
     if (userRequests.length === 0) {
         ctx.reply('📋 У вас пока нет заявок.\n\nОформить заявку: /request');
         return;
     }
-    
+
     let message = '📋 Ваши заявки:\n\n';
     userRequests.forEach((req, index) => {
         const date = new Date(req.createdAt).toLocaleDateString('ru-RU');
@@ -675,7 +690,7 @@ bot.command('myrequests', (ctx) => {
         message += `   📍 ${req.data.address}\n`;
         message += `   Статус: ${req.status}\n\n`;
     });
-    
+
     ctx.reply(message);
 });
 
@@ -699,7 +714,7 @@ bot.action(/^admin_contact_\d+$/, (ctx) => {
     }
 
     ctx.answerCbQuery();
-    
+
     const contactMessage = `
 📞 Контактные данные клиента
 
@@ -746,7 +761,7 @@ bot.action(/^admin_status_progress_\d+$/, (ctx) => {
     saveRequests(requests);
 
     ctx.answerCbQuery('✅ Статус изменён на "В работе"');
-    
+
     // Уведомляем клиента об изменении статуса
     ctx.telegram.sendMessage(request.userId, `
 🔄 Ваша заявка принята в работу!
@@ -779,7 +794,7 @@ bot.action(/^admin_status_done_\d+$/, (ctx) => {
     saveRequests(requests);
 
     ctx.answerCbQuery('✅ Статус изменён на "Выполнено"');
-    
+
     // Уведомляем клиента об изменении статуса
     ctx.telegram.sendMessage(request.userId, `
 ✅ Ваша заявка выполнена!
@@ -800,17 +815,17 @@ bot.action('admin_requests', (ctx) => {
     }
 
     ctx.answerCbQuery();
-    
+
     const requests = loadRequests();
-    
+
     if (requests.length === 0) {
         ctx.reply('📋 Заявок пока нет.');
         return;
     }
-    
+
     // Сортируем по дате (новые сверху)
     requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
+
     let message = '📋 Все заявки:\n\n';
     requests.forEach((req, index) => {
         const date = new Date(req.createdAt).toLocaleDateString('ru-RU');
@@ -822,17 +837,17 @@ bot.action('admin_requests', (ctx) => {
         message += `   📍 ${req.data.address}\n`;
         message += `   Статус: ${req.status}\n\n`;
     });
-    
+
     ctx.reply(message);
 });
 
 // Обработка текстовых сообщений
 bot.on('text', (ctx) => {
     const text = ctx.message.text.toLowerCase();
-    
+
     if (text.includes('привет') || text.includes('здравствуй')) {
-        ctx.reply('Здравствуйте! Добро пожаловать в студию Потолкоф! 🎉\n\n' + 
-                  'Я могу рассказать вам о наших услугах и помочь связаться с нами.', 
+        ctx.reply('Здравствуйте! Добро пожаловать в студию Потолкоф! 🎉\n\n' +
+                  'Я могу рассказать вам о наших услугах и помочь связаться с нами.',
                   mainMenu);
     } else if (text.includes('услуг') || text.includes('работ') || text.includes('цена')) {
         ctx.reply('Вот список наших основных услуг:', servicesMenu);
@@ -850,9 +865,14 @@ bot.action('main_menu', (ctx) => {
 
 // Меню потолков
 bot.action('ceiling_menu', (ctx) => {
-    const ceilingMessage = `🏠 Виды потолков
+    const ceilingMessage = `
+🏠 Виды потолков
+
+─────────────────────
 
 Выберите тип потолка, чтобы узнать подробнее:
+
+💡 Нажмите на кнопку ниже ⬇️
     `;
     ctx.editMessageText(ceilingMessage, ceilingMenu);
 });
@@ -864,11 +884,29 @@ bot.action('calculator', (ctx) => {
 
 // Цены
 bot.action('prices', (ctx) => {
-    let pricesMessage = '💰 Цены на услуги:\n\n';
+    let pricesMessage = `
+💰 ЦЕНЫ НА УСЛУГИ
+
+─────────────────────
+    `;
+
     companyInfo.services.forEach((service, index) => {
         pricesMessage += `${index + 1}. <b>${service.name}</b>\n   ${service.price}\n\n`;
     });
-    pricesMessage += '\n💡 Итоговая стоимость зависит от сложности работ, площади и выбранных материалов.\n\nПолучите точный расчёт через калькулятор или закажите звонок!';
+
+    pricesMessage += `
+─────────────────────
+
+💡 Итоговая стоимость зависит от:
+📐 Площади помещения
+🎨 Сложности работ
+🏗️ Выбранных материалов
+
+─────────────────────
+
+🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
+Используйте калькулятор или закажите звонок!
+    `;
 
     ctx.editMessageText(pricesMessage, {
         reply_markup: {
@@ -893,19 +931,33 @@ bot.action('request_call', (ctx) => {
 
 // Портфолио
 bot.action('portfolio', (ctx) => {
-    const portfolioMessage = `🏗️ Портфолио наших работ
+    const portfolioMessage = `
+🏗️ ПОРТФОЛИО НАШИХ РАБОТ
 
-📸 Мы выполнили более ${companyInfo.stats.objects} объектов!
+─────────────────────
 
-Наши работы включают:
+📸 Выполнено более ${companyInfo.stats.objects} объектов!
+
+─────────────────────
+
+🎨 НАШИ РАБОТЫ:
 • Натяжные потолки в квартирах и домах
 • Многоуровневые конструкции с подсветкой
 • 3D-потолки с фотопечатью
 • Комплексный ремонт под ключ
 
-💼 Хотите увидеть примеры работ?
+─────────────────────
 
-Выберите категорию:
+📊 СТАТИСТИКА:
+• ${companyInfo.stats.objects}+ выполненных объектов
+• ${companyInfo.stats.clients}+ довольных клиентов
+• ${companyInfo.stats.experience} лет опыта
+• ${companyInfo.stats.satisfaction} рекомендаций
+
+─────────────────────
+
+💼 ХОТИТЕ УВИДЕТЬ ПРИМЕРЫ?
+Выберите категорию ниже ⬇️
     `;
 
     ctx.editMessageText(portfolioMessage, {
@@ -916,7 +968,7 @@ bot.action('portfolio', (ctx) => {
                     { text: '🎥 Видеообзоры', url: 'https://vk.com/potolkoff03' }
                 ],
                 [
-                    { text: '🏠 Отзывы клиентов', url: 'https://vk.com/potolkoff03' }
+                    { text: '💬 Отзывы клиентов', url: 'https://vk.com/potolkoff03' }
                 ],
                 [
                     { text: '◀️ Назад', callback_data: 'main_menu' }
@@ -928,61 +980,140 @@ bot.action('portfolio', (ctx) => {
 
 bot.action('contacts', (ctx) => {
     const contactMessage = `
-📞 Наши контакты:
+📞 НАШИ КОНТАКТЫ
 
-Telegram: ${companyInfo.contacts.telegram}
-VK: ${companyInfo.contacts.vk}
-Instagram: ${companyInfo.contacts.instagram}
+─────────────────────
 
-Выберите удобный способ связи:
+💬 Telegram:
+${companyInfo.contacts.telegram}
+
+📱 VK:
+vk.com/${companyInfo.contacts.vk}
+
+📸 Instagram:
+${companyInfo.contacts.instagram}
+
+─────────────────────
+
+🕒 РАБОЧЕЕ ВРЕМЯ:
+Пн-Пт: 9:00 - 18:00
+Сб-Вс: выходной
+
+─────────────────────
+
+📞 НУЖЕН ЗВОНОК?
+Нажмите кнопку ниже ⬇️
     `;
     ctx.editMessageText(contactMessage, contactsMenu);
 });
 
 bot.action('phone', (ctx) => {
     ctx.answerCbQuery();
-    ctx.reply(`📞 Наш телефон:\n\n${companyInfo.contacts.phone}\n\nПозвоните нам в рабочее время!`);
+    ctx.reply(`
+📞 НАШ ТЕЛЕФОН
+
+─────────────────────
+
+${companyInfo.contacts.phone}
+
+─────────────────────
+
+🕒 Позвоните в рабочее время:
+Пн-Пт: 9:00 - 18:00
+
+💡 Если мы не ответили - напишите нам в Telegram!
+    `);
 });
 
 bot.action('services', (ctx) => {
-    let servicesMessage = '💼 Наши услуги:\n\n';
+    let servicesMessage = `
+💼 НАШИ УСЛУГИ
+
+─────────────────────
+    `;
+
     companyInfo.services.forEach((service, index) => {
-        servicesMessage += `${index + 1}. <b>${service.name}</b>\n   Цена: ${service.price}\n\n`;
+        servicesMessage += `${index + 1}. <b>${service.name}</b>\n   💵 ${service.price}\n\n`;
     });
-    servicesMessage += 'Хотите узнать подробнее об одной из услуг?';
-    
+
+    servicesMessage += `
+─────────────────────
+
+💡 ХОТИТЕ УЗНАТЬ БОЛЬШЕ?
+Нажмите на услугу в меню ниже ⬇️
+    `;
+
     ctx.editMessageText(servicesMessage, servicesMenu);
 });
 
 bot.action('about', (ctx) => {
     let aboutMessage = `
-ℹ️ О компании ${companyInfo.name}
+ℹ️ О КОМПАНИИ ${companyInfo.name}
 
-${companyInfo.fullName} - это команда профессионалов, которая уже более ${companyInfo.stats.experience} лет создает уют и комфорт в домах и квартирах Улан-Удэ.
+─────────────────────
 
-✨ Наши преимущества:
+${companyInfo.fullName}
+
+"${companyInfo.slogan}"
+
+─────────────────────
+
+🏙️ РАБОТАЕМ В:
+Улан-Удэ и Бурятии
+
+👷 КОМАНДА ПРОФЕССИОНАЛОВ:
+Создаем уют и комфорт в домах уже ${companyInfo.stats.experience}+ лет!
+
+─────────────────────
+
+✨ НАШИ ПРЕИМУЩЕСТВА:
     `;
     companyInfo.features.forEach(feature => {
-        aboutMessage += `• ${feature}\n`;
+        aboutMessage += `✅ ${feature}\n`;
     });
-    
-    aboutMessage += `\n${companyInfo.slogan}`;
-    
+
+    aboutMessage += `
+─────────────────────
+
+📞 СВЯЖИТЕСЬ С НАМИ:
+${companyInfo.contacts.phone}
+${companyInfo.contacts.telegram}
+    `;
+
     ctx.editMessageText(aboutMessage, mainMenu);
 });
 
 bot.action('stats', (ctx) => {
     const statsMessage = `
-📊 Наша статистика:
+📊 НАША СТАТИСТИКА
 
-• Объектов выполнено: ${companyInfo.stats.objects}
-• Довольных клиентов: ${companyInfo.stats.clients}+
-• Лет на рынке: ${companyInfo.stats.experience}
-• Уровень удовлетворенности: ${companyInfo.stats.satisfaction}
+─────────────────────
 
-Мы гордимся качеством нашей работы и благодарны каждому клиенту!
+🏠 Объектов выполнено:
+${companyInfo.stats.objects}
+
+👥 Довольных клиентов:
+${companyInfo.stats.clients}+
+
+⏰ Лет на рынке:
+${companyInfo.stats.experience}
+
+⭐ Уровень удовлетворенности:
+${companyInfo.stats.satisfaction}
+
+─────────────────────
+
+💡 ЧТО ЭТО ЗНАЧИТ:
+• Мы знаем своё дело
+• Клиенты доверяют нам
+• Качество гарантируем
+• Репутация важна
+
+─────────────────────
+
+🎁 Выбираете нас — выбираете качество!
     `;
-    
+
     ctx.editMessageText(statsMessage, mainMenu);
 });
 
@@ -996,82 +1127,157 @@ bot.action('consultation', (ctx) => {
 bot.action(/^service_/, (ctx) => {
     const serviceCode = ctx.callbackQuery.data.split('_')[1];
     let serviceDetail = '';
-    
+
     switch(serviceCode) {
         case 'ceiling':
             serviceDetail = `
-<b>Натяжные потолки</b>
+<b>НАТЯЖНЫЕ ПОТОЛКИ</b>
 
-Цена: от ${companyInfo.services[0].price}
+─────────────────────
 
-✨ Преимущества:
-• Быстрый монтаж (1-2 дня)
-• Водонепроницаемость
-• Разнообразие фактур и цветов
-• Гарантия качества
-• Экономичное освещение
+💰 Цена: от ${companyInfo.services[0].price}
 
-Идеальное решение для любого помещения!
+─────────────────────
+
+✨ ПРЕИМУЩЕСТВА:
+⚡ Быстрый монтаж (1-2 дня)
+💧 Водонепроницаемость
+🎨 Разнообразие фактур и цветов
+✅ Гарантия качества
+💡 Экономичное освещение
+
+─────────────────────
+
+🏠 ИДЕАЛЬНО ДЛЯ:
+• Квартир и домов
+• Офисов и коммерческих помещений
+• Ванных комнат и кухонь
+
+─────────────────────
+
+💬 Хотите узнать больше?
+Закажите консультацию!
             `;
             break;
         case 'multi':
             serviceDetail = `
-<b>Многоуровневые потолки</b>
+<b>МНОГОУРОВНЕВЫЕ ПОТОЛКИ</b>
 
-Цена: от ${companyInfo.services[1].price}
+─────────────────────
 
-🌟 Особенности:
-• Современный дизайн
-• Подсветка разных уровней
-• Визуальное увеличение пространства
-• Индивидуальные решения
+💰 Цена: от ${companyInfo.services[1].price}
 
-Создаем уникальный образ вашего интерьера!
+─────────────────────
+
+🌟 ОСОБЕННОСТИ:
+🎨 Современный дизайн
+💡 Подсветка разных уровней
+📐 Визуальное увеличение пространства
+🎯 Индивидуальные решения
+
+─────────────────────
+
+✅ ПРЕИМУЩЕСТВА:
+• Уникальный образ интерьера
+• Скрытие коммуникаций
+• Зонирование пространства
+• Роскошный внешний вид
+
+─────────────────────
+
+🎁 ОФЕРТА:
+Бесплатный 3D-проект при заказе!
             `;
             break;
         case '3d':
             serviceDetail = `
-<b>3D-потолки с фотопечатью</b>
+<b>3D-ПОТОЛКИ С ФОТОПЕЧАТЬЮ</b>
 
-Цена: от ${companyInfo.services[2].price}
+─────────────────────
 
-🎨 Возможности:
-• Фотопечать высокого качества
-• Любой дизайн по вашему желанию
-• Объемный эффект
-• Уникальность решения
+💰 Цена: от ${companyInfo.services[2].price}
 
-Превращаем потолок в произведение искусства!
+─────────────────────
+
+🎨 ВОЗМОЖНОСТИ:
+📷 Фотопечать высокого качества
+🎨 Любой дизайн по вашему желанию
+🌟 Объемный эффект
+✨ Уникальность решения
+
+─────────────────────
+
+✨ ГДЕ ИСПОЛЬЗОВАТЬ:
+• Детские комнаты
+• Спальни
+• Гостиные
+• Игровые зоны
+
+─────────────────────
+
+🎁 ПРЕДЛОЖЕНИЕ:
+Принесите свою картинку - сделаем!
             `;
             break;
         case 'repair':
             serviceDetail = `
-<b>Ремонт "под ключ"</b>
+<b>РЕМОНТ "ПОД КЛЮЧ"</b>
 
-Цена: по запросу
+─────────────────────
 
-🏠 Что входит:
-• Полный комплекс работ
-• От demolition до финальной отделки
-• Авторский надзор
-• Гарантия на все работы
+💰 Цена: по запросу
 
-Превращаем любую квартиру в мечту!
+─────────────────────
+
+🏠 ЧТО ВХОДИТ:
+🔨 Полный комплекс работ
+🏗️ От demolition до финальной отделки
+👷 Авторский надзор
+✅ Гарантия на все работы
+
+─────────────────────
+
+📋 ЭТАПЫ РАБОТ:
+1️⃣ Проектирование и расчёт
+2️⃣ Демонтажные работы
+3️⃣ Черновая отделка
+4️⃣ Чистовая отделка
+5️⃣ Мебель и декор
+
+─────────────────────
+
+🎁 БОНУС:
+Бесплатный выезд на замер!
             `;
             break;
         case 'design':
             serviceDetail = `
-<b>Дизайн интерьеров</b>
+<b>ДИЗАЙН ИНТЕРЬЕРОВ</b>
 
-Цена: по запросу
+─────────────────────
 
-✨ Услуги:
-• Разработка концепции
-• Планировочные решения
-• 3D-визуализация
-• Авторский надзор
+💰 Цена: по запросу
 
-Создаем пространство, которое радует глаз!
+─────────────────────
+
+✨ УСЛУГИ:
+🎨 Разработка концепции
+📐 Планировочные решения
+🎬 3D-визуализация
+👷 Авторский надзор
+
+─────────────────────
+
+💼 ЧТО ПОЛУЧИТЕ:
+• Индивидуальный дизайн
+• Фотореалистичные 3D-рендеры
+• Подбор материалов
+• Расчёт сметы
+
+─────────────────────
+
+🎁 ОФЕРТА:
+Первое посещение бесплатно!
             `;
             break;
         case 'photowall':
@@ -1152,7 +1358,7 @@ bot.action(/^service_/, (ctx) => {
         default:
             serviceDetail = 'Уточните информацию об этой услуге у нашего менеджера.';
     }
-    
+
     ctx.editMessageText(serviceDetail, {
         reply_markup: {
             inline_keyboard: [
