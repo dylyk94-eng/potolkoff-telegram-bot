@@ -641,6 +641,17 @@ bot.use(session());
 // Подключаем stage
 bot.use(stage.middleware());
 
+// Middleware для автоматического приветствия новых пользователей
+bot.use(async (ctx, next) => {
+    // Проверяем, это ли первый раз когда пользователь пишет боту
+    if (!ctx.session.welcomed && ctx.message && !ctx.message.text.startsWith('/')) {
+        ctx.session.welcomed = true;
+        await ctx.replyWithMarkdown(welcomeMessage, startMenu);
+        return;
+    }
+    return next();
+});
+
 // Приветственное сообщение
 const welcomeMessage = `
 ✨ Добро пожаловать в мир красивых потолков!
@@ -705,11 +716,13 @@ const startMenu = {
 
 // Запуск бота
 bot.start((ctx) => {
+    ctx.session.welcomed = true;
     ctx.replyWithMarkdown(welcomeMessage, startMenu);
 });
 
 // Обработка кнопки НАЧАТЬ
 bot.action('start_now', (ctx) => {
+    ctx.session.welcomed = true;
     ctx.editMessageText(`
 👋 Добро пожаловать, ${ctx.from.first_name || 'гость'}!
 
