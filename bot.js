@@ -214,11 +214,14 @@ const requestScene = new Scenes.WizardScene(
         
         if (contacts && contacts.length > 5) {
             ctx.session.request.contacts = contacts;
-            ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно) или напишите "Пропустить":`, {
+            const skipKeyboard = {
                 reply_markup: {
-                    remove_keyboard: true
+                    inline_keyboard: [
+                        [{ text: '⏭️ Пропустить', callback_data: 'req_skip_comment' }]
+                    ]
                 }
-            });
+            };
+            ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно):`, skipKeyboard);
             return ctx.wizard.next();
         }
         
@@ -230,11 +233,14 @@ const requestScene = new Scenes.WizardScene(
             const contacts = ctx.message.text.trim();
             if (contacts.length > 5) {
                 ctx.session.request.contacts = contacts;
-                ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно) или напишите "Пропустить":`, {
+                const skipKeyboard = {
                     reply_markup: {
-                        remove_keyboard: true
+                        inline_keyboard: [
+                            [{ text: '⏭️ Пропустить', callback_data: 'req_skip_comment' }]
+                        ]
                     }
-                });
+                };
+                ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно):`, skipKeyboard);
                 return ctx.wizard.next();
             }
         }
@@ -275,6 +281,39 @@ const requestScene = new Scenes.WizardScene(
         }
     }
 );
+
+// Обработка callback для пропуска комментария
+requestScene.action('req_skip_comment', (ctx) => {
+    ctx.session.request.comment = '';
+    ctx.answerCbQuery();
+
+    const confirmKeyboard = {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '✅ Подтвердить', callback_data: 'req_confirm' },
+                    { text: '❌ Отменить', callback_data: 'req_cancel' }
+                ],
+                [
+                    { text: '📝 Изменить', callback_data: 'req_edit' }
+                ]
+            ]
+        }
+    };
+
+    let summary = `
+📋 Проверьте данные заявки:
+
+🏠 Услуга: ${ctx.session.request.service}
+📐 Площадь: ${ctx.session.request.area} м²
+📍 Адрес: ${ctx.session.request.address}
+👤 Контакты: ${ctx.session.request.contacts}
+💬 Комментарий: Нет
+            `;
+
+    ctx.reply(summary, confirmKeyboard);
+    return ctx.wizard.next();
+});
 
 // Обработка callback для подтверждения
 requestScene.action('req_confirm', async (ctx) => {
