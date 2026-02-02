@@ -1464,14 +1464,19 @@ bot.action(/^service_/, (ctx) => {
     }
 
     ctx.editMessageText(serviceDetail, {
+        parse_mode: 'HTML',
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: '📞 Получить расчет', url: `tel:${companyInfo.contacts.phone.replace(/\s/g, '')}` },
+                    { text: '📏 Заказать замер', callback_data: 'request_call' },
                     { text: '💬 Написать в Telegram', url: `https://t.me/${companyInfo.contacts.telegram.replace('@', '')}` }
                 ],
                 [
-                    { text: '◀️ Назад к услугам', callback_data: 'services' },
+                    { text: '📐 Калькулятор', callback_data: 'calculator' },
+                    { text: '💰 Цены', callback_data: 'prices' }
+                ],
+                [
+                    { text: '◀️ Назад', callback_data: 'ceiling_menu' },
                     { text: '🏠 Главное меню', callback_data: 'main_menu' }
                 ]
             ]
