@@ -76,7 +76,6 @@ async function notifyAdmin(ctx, request) {
 🏠 Услуга: ${request.data.service}
 📐 Площадь: ${request.data.area} м²
 📍 Адрес: ${request.data.address}
-📅 Желаемая дата: ${request.data.datetime}
 👤 Контакты: ${request.data.contacts}
 💬 Комментарий: ${request.data.comment || 'Нет'}
 
@@ -136,7 +135,7 @@ const requestScene = new Scenes.WizardScene(
                 ]
             }
         };
-        ctx.reply('📋 Шаг 1 из 6\n\nВыберите услугу:', serviceKeyboard);
+        ctx.reply('📋 Шаг 1 из 5\n\nВыберите услугу:', serviceKeyboard);
         return ctx.wizard.next();
     },
     // Шаг 2: Ввод площади
@@ -152,7 +151,7 @@ const requestScene = new Scenes.WizardScene(
             ];
             ctx.session.request.service = services[serviceIndex];
             ctx.answerCbQuery();
-            ctx.reply(`📋 Шаг 2 из 6\n\nВыбранная услуга: ${ctx.session.request.service}\n\nВведите площадь помещения (в м²):`);
+            ctx.reply(`📋 Шаг 2 из 5\n\nВыбранная услуга: ${ctx.session.request.service}\n\nВведите площадь помещения (в м²):`);
         } else {
             ctx.reply('Пожалуйста, выберите услугу из предложенного списка.');
         }
@@ -164,7 +163,7 @@ const requestScene = new Scenes.WizardScene(
             const area = ctx.message.text.trim();
             if (!isNaN(area) && parseFloat(area) > 0) {
                 ctx.session.request.area = parseFloat(area);
-                ctx.reply(`📋 Шаг 3 из 6\n\nПлощадь: ${ctx.session.request.area} м²\n\nВведите адрес для замера:`);
+                ctx.reply(`📋 Шаг 3 из 5\n\nПлощадь: ${ctx.session.request.area} м²\n\nВведите адрес для замера:`);
             } else {
                 ctx.reply('Пожалуйста, введите корректное число (площадь в м²).');
             }
@@ -173,90 +172,69 @@ const requestScene = new Scenes.WizardScene(
         }
         return ctx.wizard.next();
     },
-    // Шаг 4: Выбор даты и времени
+    // Шаг 4: Ввод контактов
     (ctx) => {
         if (ctx.message && ctx.message.text) {
             const address = ctx.message.text.trim();
             if (address.length > 5) {
                 ctx.session.request.address = address;
-                const datetimeKeyboard = {
+                const contactKeyboard = {
                     reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: 'Сегодня', callback_data: 'req_dt_today' },
-                                { text: 'Завтра', callback_data: 'req_dt_tomorrow' }
-                            ],
-                            [
-                                { text: 'На этой неделе', callback_data: 'req_dt_week' },
-                                { text: 'На следующей неделе', callback_data: 'req_dt_nextweek' }
-                            ],
-                            [
-                                { text: '✍️ Ввести дату вручную', callback_data: 'req_dt_manual' }
-                            ]
-                        ]
+                        keyboard: [
+                            [{ text: '📱 Отправить контакт', request_contact: true }],
+                            [{ text: '✍️ Ввести вручную' }]
+                        ],
+                        resize_keyboard: true,
+                        one_time_keyboard: true
                     }
                 };
-                ctx.reply(`📋 Шаг 4 из 6\n\nАдрес: ${ctx.session.request.address}\n\nВыберите удобную дату для замера:`, datetimeKeyboard);
+                ctx.reply(`📋 Шаг 4 из 5\n\nАдрес: ${ctx.session.request.address}\n\nВыберите способ указания контактов:`, contactKeyboard);
             } else {
                 ctx.reply('Пожалуйста, введите полный адрес (минимум 5 символов).');
             }
         }
         return ctx.wizard.next();
     },
-    // Шаг 5: Ввод контактов
+    // Шаг 5: Комментарий (опционально)
     (ctx) => {
-        if (ctx.callbackQuery) {
-            const action = ctx.callbackQuery.data.split('_')[2];
-            const now = new Date();
-            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-
-            switch(action) {
-                case 'today':
-                    ctx.session.request.datetime = `Сегодня, ${now.toLocaleDateString('ru-RU', options)}`;
-                    break;
-                case 'tomorrow':
-                    now.setDate(now.getDate() + 1);
-                    ctx.session.request.datetime = `Завтра, ${now.toLocaleDateString('ru-RU', options)}`;
-                    break;
-                case 'week':
-                    ctx.session.request.datetime = 'На этой неделе';
-                    break;
-                case 'nextweek':
-                    ctx.session.request.datetime = 'На следующей неделе';
-                    break;
-                case 'manual':
-                    ctx.session.request.datetime = '';
-                    ctx.answerCbQuery();
-                    ctx.reply('📋 Шаг 4 из 6 (продолжение)\n\nВведите желаемую дату и время для замера (например: "15 февраля в 14:00"):');
-                    return ctx.wizard.next(); // Пропускаем следующий шаг, ждем ввода даты
+        let contacts;
+        
+        if (ctx.message && ctx.message.contact) {
+            // Контакт отправлен через кнопку
+            const contact = ctx.message.contact;
+            contacts = `${contact.first_name || ''} ${contact.last_name || ''}, ${contact.phone_number}`.trim();
+        } else if (ctx.message && ctx.message.text) {
+            // Контакт введён вручную
+            contacts = ctx.message.text.trim();
+            if (contacts.toLowerCase() === 'ввести вручную') {
+                ctx.reply('📋 Шаг 4 из 5 (продолжение)\n\nВведите ваше имя и номер телефона:\nНапример: Иван, +7 (983) 123-45-67');
+                return ctx.wizard.next(); // Ждём ввода контакта вручную
             }
-            ctx.answerCbQuery();
-            ctx.reply(`📋 Шаг 5 из 6\n\nДата: ${ctx.session.request.datetime}\n\nВведите ваше имя и номер телефона:\nНапример: Иван, +7 (983) 123-45-67`);
+        }
+        
+        if (contacts && contacts.length > 5) {
+            ctx.session.request.contacts = contacts;
+            ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно) или напишите "Пропустить":`, {
+                reply_markup: {
+                    remove_keyboard: true
+                }
+            });
             return ctx.wizard.next();
-        } else {
-            ctx.reply('Пожалуйста, выберите вариант из предложенных.');
         }
-        return ctx.wizard.next();
+        
+        ctx.reply('Пожалуйста, отправьте контакт или введите имя и номер телефона.');
     },
-    // Шаг 5.1: Ввод даты вручную
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            const datetime = ctx.message.text.trim();
-            if (datetime.length > 3) {
-                ctx.session.request.datetime = datetime;
-                ctx.reply(`📋 Шаг 5 из 6\n\nДата: ${ctx.session.request.datetime}\n\nВведите ваше имя и номер телефона:\nНапример: Иван, +7 (983) 123-45-67`);
-                return ctx.wizard.next();
-            }
-        }
-        ctx.reply('Пожалуйста, введите корректную дату.');
-    },
-    // Шаг 6: Комментарий (опционально)
+    // Шаг 5.1: Ввод контакта вручную
     (ctx) => {
         if (ctx.message && ctx.message.text) {
             const contacts = ctx.message.text.trim();
             if (contacts.length > 5) {
                 ctx.session.request.contacts = contacts;
-                ctx.reply(`📋 Шаг 6 из 6\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно) или напишите "Пропустить":`);
+                ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно) или напишите "Пропустить":`, {
+                    reply_markup: {
+                        remove_keyboard: true
+                    }
+                });
                 return ctx.wizard.next();
             }
         }
@@ -289,7 +267,6 @@ const requestScene = new Scenes.WizardScene(
 🏠 Услуга: ${ctx.session.request.service}
 📐 Площадь: ${ctx.session.request.area} м²
 📍 Адрес: ${ctx.session.request.address}
-📅 Дата: ${ctx.session.request.datetime}
 👤 Контакты: ${ctx.session.request.contacts}
 💬 Комментарий: ${ctx.session.request.comment || 'Нет'}
             `;
@@ -1046,22 +1023,6 @@ ${phoneNumber}
             ]
         }
     });
-});
-    ctx.answerCbQuery();
-    ctx.reply(`
-📞 НАШ ТЕЛЕФОН
-
-─────────────────────
-
-${companyInfo.contacts.phone}
-
-─────────────────────
-
-🕒 Позвоните в рабочее время:
-Пн-Пт: 9:00 - 18:00
-
-💡 Если мы не ответили - напишите нам в Telegram!
-    `);
 });
 
 bot.action('services', (ctx) => {
