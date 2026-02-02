@@ -3,48 +3,50 @@ const { Telegraf, Scenes, session, Markup } = require('telegraf');
 const express = require('express');
 
 // --- 1. БАЗА ДАННЫХ КАТАЛОГА ---
+// Совет: Используй file_id (загрузи фото боту), а не ссылки. Это работает мгновенно.
 const CATALOG = {
     satin: {
         id: 'satin',
         name: '✨ Сатиновые потолки',
-        price: 'от 2000 ₽/м²',
-        desc: 'Эффект ткани с легким блеском. Идеально для спальни.',
-        img: 'https://potolok-art.ru/wp-content/uploads/2/6/5/2658826500e5728646f9055819074092.jpeg'
+        price: 2000,
+        description: 'Имитация ткани с легким перламутровым блеском. Идеально для спальни и гостиной.',
+        image: 'https://potolok-art.ru/wp-content/uploads/2/6/5/2658826500e5728646f9055819074092.jpeg'
+        // Замени на file_id: 'AgACAgIAAxkBAAIB...'
     },
     matte: {
         id: 'matte',
         name: '☁️ Матовые потолки',
-        price: 'от 1800 ₽/м²',
-        desc: 'Классика. Выглядит как идеально ровная побелка.',
-        img: 'https://sk-potolok.ru/wp-content/uploads/2018/06/matoviy-natyazhnoy-potolok-foto-v-interere.jpg'
+        price: 1800,
+        description: 'Классика, похожая на идеальную побелку. Не бликует, подходит для любого интерьера.',
+        image: 'https://sk-potolok.ru/wp-content/uploads/2018/06/matoviy-natyazhnoy-potolok-foto-v-interere.jpg'
     },
     gloss: {
         id: 'gloss',
         name: '🪞 Глянцевые потолки',
-        price: 'от 1900 ₽/м²',
-        desc: 'Визуально увеличивают комнату. Яркие и эффектные.',
-        img: 'https://potolki-lider.ru/wp-content/uploads/2019/10/glyancevye-potolki-v-zale.jpg'
+        price: 1900,
+        description: 'Визуально увеличивают пространство и высоту комнаты за счет отражения. Яркое решение.',
+        image: 'https://potolki-lider.ru/wp-content/uploads/2019/10/glyancevye-potolki-v-zale.jpg'
     },
     fabric: {
         id: 'fabric',
         name: '🧵 Тканевые потолки',
-        price: 'от 3500 ₽/м²',
-        desc: 'Премиум материал. Дышащая структура, монтаж без нагрева.',
-        img: 'https://potolkilid.ru/wp-content/uploads/2021/02/tkanevye-natyazhnye-potolki-foto.jpg'
-    },
-    lines: {
-        id: 'lines',
-        name: '🔦 Парящие линии',
-        price: 'от 4500 ₽/м²',
-        desc: 'Современный тренд. Светодиодные линии вместо люстры.',
-        img: 'https://ferico.by/images/new/osveshchenie/linii/linii-1.jpg'
+        price: 3500,
+        description: 'Премиальный материал. Дышащая текстура, морозоустойчивость, монтаж без нагрева.',
+        image: 'https://potolkilid.ru/wp-content/uploads/2021/02/tkanevye-natyazhnye-potolki-foto.jpg'
     },
     photo: {
         id: 'photo',
         name: '🖼️ С фотопечатью',
-        price: 'от 3000 ₽/м²',
-        desc: 'Любое изображение на потолке: небо, узоры, цветы.',
-        img: 'https://cdn.potolkoff.ru/wp-content/uploads/2020/06/foto-potolok-v-detskuyu.jpg'
+        price: 3000,
+        description: 'Нанесение любого изображения: небо, узоры, цветы. Индивидуальный дизайн.',
+        image: 'https://cdn.potolkoff.ru/wp-content/uploads/2020/06/foto-potolok-v-detskuyu.jpg'
+    },
+    lines: {
+        id: 'lines',
+        name: '🔦 Парящие линии',
+        price: 4500,
+        description: 'Современный тренд со встроенной светодиодной подсветкой. Заменяет основное освещение.',
+        image: 'https://ferico.by/images/new/osveshchenie/linii/linii-1.jpg'
     }
 };
 
@@ -192,37 +194,51 @@ bot.action('catalog_start', async (ctx) => {
     await ctx.deleteMessage().catch(() => {});
 
     await ctx.replyWithPhoto(
-        'https://via.placeholder.com/800x400?text=CATALOG',
+        'https://i.pinimg.com/originals/8d/62/77/8d6277987e35cc25992e92c270d183d3.jpg',
         {
-            caption: '<b>🎨 Каталог Потолкоф</b>\n\nВыберите вид потолка, чтобы увидеть фото и описание:',
+            caption: '<b>🎨 Каталог решений Потолкоф</b>\n\nМы используем только сертифицированные полотна (MSD, Pongs, Descor). Выберите категорию, чтобы узнать подробнее:',
             parse_mode: 'HTML',
             reply_markup: Markup.inlineKeyboard([
-                [Markup.button.callback('✨ Сатиновые', 'view_satin'), Markup.button.callback('☁️ Матовые', 'view_matte')],
-                [Markup.button.callback('🪞 Глянцевые', 'view_gloss'), Markup.button.callback('🧵 Тканевые', 'view_fabric')],
-                [Markup.button.callback('🔦 Линии', 'view_lines'), Markup.button.callback('🖼️ Фотопечать', 'view_photo')],
-                [Markup.button.callback('🔙 В главное меню', 'back_home')]
+                [Markup.button.callback(CATALOG.satin.name, 'cat_view_satin'), Markup.button.callback(CATALOG.matte.name, 'cat_view_matte')],
+                [Markup.button.callback(CATALOG.gloss.name, 'cat_view_gloss'), Markup.button.callback(CATALOG.fabric.name, 'cat_view_fabric')],
+                [Markup.button.callback(CATALOG.lines.name, 'cat_view_lines'), Markup.button.callback(CATALOG.photo.name, 'cat_view_photo')],
+                [Markup.button.callback('🔙 Вернуться в меню', 'back_to_main')]
             ])
         }
     );
 });
 
 // КАТАЛОГ: Просмотр товара (Динамический обработчик)
-bot.action(/^view_(.+)$/, async (ctx) => {
-    const typeId = ctx.match[1];
-    const item = CATALOG[typeId];
+bot.action(/^cat_view_(.+)$/, async (ctx) => {
+    try {
+        const typeId = ctx.match[1];
+        const item = CATALOG[typeId];
 
-    if (!item) return ctx.answerCbQuery('Ошибка каталога');
+        if (!item) return ctx.answerCbQuery('Раздел в разработке');
 
-    await ctx.deleteMessage().catch(() => {}); // Убираем меню
+        // Удаляем старое сообщение (меню), чтобы не захламлять чат
+        await ctx.deleteMessage().catch(() => {});
 
-    await ctx.replyWithPhoto(item.img, {
-        caption: `<b>${item.name}</b>\n\n📝 ${item.desc}\n\n💰 Цена: <b>${item.price}</b>\n\n<i>Хотите узнать точную стоимость для вашей комнаты?</i>`,
-        parse_mode: 'HTML',
-        reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('📏 Записаться на замер', `order_item_${typeId}`)],
-            [Markup.button.callback('🔙 К каталогу', 'catalog_start')]
-        ])
-    });
+        // Отправляем карточку товара
+        await ctx.replyWithPhoto(item.image, {
+            caption: `<b>${item.name}</b>\n\n` +
+                    `📄 <i>${item.description}</i>\n\n` +
+                    `💰 <b>Цена: от ${item.price} ₽/м²</b>\n\n` +
+                    `⏱ Монтаж: от 3 часов\n` +
+                    `🛡 Гарантия: 15 лет`,
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('📏 Записаться на замер', `order_item_${typeId}`)],
+                [Markup.button.callback('🔙 Назад к списку', 'catalog_start')]
+            ])
+        });
+
+        await ctx.answerCbQuery(); // Убираем часики загрузки
+
+    } catch (e) {
+        console.error(e);
+        await ctx.reply('Ошибка загрузки каталога.');
+    }
 });
 
 // КАТАЛОГ: Заказ конкретного вида
@@ -231,11 +247,12 @@ bot.action(/^order_item_(.+)$/, async (ctx) => {
     const itemName = CATALOG[typeId]?.name || 'Потолок';
 
     await ctx.deleteMessage().catch(() => {});
-    await ctx.scene.enter('ORDER_SCENE', { interest: itemName });
+    // Заходим в сцену и передаем, что именно выбрал клиент
+    ctx.scene.enter('ORDER_SCENE', { interest: itemName });
 });
 
 // Навигация
-bot.action('back_home', (ctx) => {
+bot.action('back_to_main', (ctx) => {
     ctx.deleteMessage().catch(() => {});
     ctx.reply('Главное меню:', getMainMenu());
 });
@@ -288,6 +305,16 @@ bot.on('text', async (ctx) => {
         }
     }
 });
+
+// 💣 Получение file_id для фото (временный код - удалить после получения IDs)
+// Для получения file_id: отправь фото боту, он пришлет ID
+// Затем скопируй ID и вставь в объект CATALOG вместо URL
+/*
+bot.on('photo', (ctx) => {
+    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    ctx.reply(`ID этого фото: <code>${fileId}</code>`, { parse_mode: 'HTML' });
+});
+*/
 
 // ============================================
 // Webhook setup for Railway
