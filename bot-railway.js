@@ -1,1057 +1,362 @@
-const { Telegraf, Scenes, session } = require('telegraf');
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
+const { Telegraf, Scenes, session, Markup } = require('telegraf');
+const express = require('express');
 
-// Получаем токен бота из переменных окружения
-const BOT_TOKEN = process.env.BOT_TOKEN;
+// --- НАСТРОЙКИ И ДАННЫЕ ---
+const SERVICES = {
+    'satin': { name: '✨ Сатиновые', price: 2000, img: 'https://via.placeholder.com/600x400.png?text=Satin' },
+    'matte': { name: '☁️ Матовые', price: 2000, img: 'https://via.placeholder.com/600x400.png?text=Matte' },
+    'gloss': { name: '🪞 Глянцевые', price: 2000, img: 'https://via.placeholder.com/600x400.png?text=Gloss' },
+    'fabric': { name: '🧵 Тканевые', price: 2500, img: 'https://via.placeholder.com/600x400.png?text=Fabric' },
+    'multi': { name: '🏛️ Многоуровневые', price: 4500, img: 'https://via.placeholder.com/600x400.png?text=Multi' },
+    'photo': { name: '🖼️ С фотопечатью', price: 3500, img: 'https://via.placeholder.com/600x400.png?text=Photo' }
+};
+
+// --- СЦЕНА КАЛЬКУЛЯТОРА ---
+const calcWizard = new Scenes.WizardScene(
+    'CALC_SCENE',
+    // Шаг 1: Выбор типа
+    async (ctx) => {
+        await ctx.reply('🧮 <b>Шаг 1/3:</b> Выберите тип потолка:', {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('☁️ Матовый', 'type_matte'), Markup.button.callback('🪞 Глянцевый', 'type_gloss')],
+                [Markup.button.callback('✨ Сатиновый', 'type_satin'), Markup.button.callback('🧵 Тканевый', 'type_fabric')],
+                [Markup.button.callback('🔙 Отмена', 'cancel')]
+            ]).resize()
+        });
+        return ctx.wizard.next();
+    },
+    // Шаг 2: Площадь
+    async (ctx) => {
+        if (ctx.callbackQuery) {
+            if (ctx.callbackQuery.data === 'cancel') return leaveScene(ctx);
+            const typeKey = ctx.callbackQuery.data.replace('type_', '');
+            ctx.wizard.state.type = SERVICES[typeKey];
+            await ctx.answerCbQuery();
+        }
+        await ctx.reply('📐 <b>Шаг 2/3:</b> Введите площадь помещения (м²):', { parse_mode: 'HTML' });
+        return ctx.wizard.next();
+    },
+    // Шаг 3: Освещение
+    async (ctx) => {
+        const area = parseFloat(ctx.message?.text);
+        if (isNaN(area)) return ctx.reply('⚠️ Пожалуйста, введите число (например: 15)');
+        ctx.wizard.state.area = area;
+        await ctx.reply('💡 <b>Шаг 3/3:</b> Планируется ли освещение?', {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('🚫 Только люстра (0₽)', 'light_0')],
+                [Markup.button.callback('🔅 До 6 точек (+3000₽)', 'light_3000')],
+                [Markup.button.callback('🔆 Много света (+6000₽)', 'light_6000')]
+            ])
+        });
+        return ctx.wizard.next();
+    },
+    // Финал: Расчет
+    async (ctx) => {
+        if (ctx.callbackQuery) {
+            const extraCost = parseInt(ctx.callbackQuery.data.split('_')[1]);
+            ctx.wizard.state.extraCost = extraCost;
+            await ctx.answerCbQuery();
+        }
+        const { type, area, extraCost } = ctx.wizard.state;
+        const basePrice = area * type.price;
+        const totalMin = basePrice + extraCost;
+        const totalMax = totalMin * 1.2; // +20% разброс
+
+        // Сохраняем данные, если клиент захочет заказать сразу
+        ctx.session.preCalc = {
+            service: type.name,
+            area: area,
+            priceStr: `${totalMin} - ${totalMax} ₽`
+        };
+
+        await ctx.reply(
+            `💰 <b>Расчет стоимости:</b>\n\n` +
+            `🔹 Тип: ${type.name}\n` +
+            `🔹 Площадь: ${area} м²\n` +
+            `🔹 Доп. опции: ${extraCost > 0 ? 'Включены' : 'Базовые'}\n\n` +
+            `💵 <b>Итого: ${totalMin} - ${totalMax} ₽</b>\n\n` +
+            `<i>*Стоимость примерная. Точную скажет замерщик.</i>`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                    [Markup.button.callback('🚀 Оформить заявку', 'start_order_from_calc')],
+                    [Markup.button.callback('🔄 Новый расчет', 'restart_calc')],
+                    [Markup.button.callback('🔙 В меню', 'exit_calc')]
+                ])
+            }
+        );
+        return ctx.wizard.leave();
+    }
+);
+
+// --- СЦЕНА ЗАЯВКИ (ORDER) ---
+const orderWizard = new Scenes.WizardScene(
+    'ORDER_SCENE',
+    // Шаг 1: Выбор услуги (если не выбрана ранее)
+    async (ctx) => {
+        // Если перешли из калькулятора, пропускаем этот шаг
+        if (ctx.session.preCalc) {
+            ctx.wizard.state.formData = { ...ctx.session.preCalc };
+            await ctx.reply(`✅ Выбрано: ${ctx.wizard.state.formData.service}, ${ctx.wizard.state.formData.area} м²`);
+            return ctx.wizard.selectStep(2); // Прыгаем к адресу
+        }
+        ctx.wizard.state.formData = {};
+        await ctx.reply('🛠 Что будем делать?', {
+            reply_markup: Markup.keyboard([
+                ['✨ Натяжные потолки', '🔧 Ремонт под ключ'],
+                ['🔙 Отмена']
+            ]).oneTime().resize()
+        });
+        return ctx.wizard.next();
+    },
+    // Шаг 2: Площадь (если не из калькулятора)
+    async (ctx) => {
+        if (ctx.message?.text === '🔙 Отмена') return leaveScene(ctx);
+        if (!ctx.wizard.state.formData.service) {
+            ctx.wizard.state.formData.service = ctx.message.text;
+        }
+        if (ctx.wizard.state.formData.area) return ctx.wizard.next();
+        await ctx.reply('📐 Укажите примерную площадь (м²):');
+        return ctx.wizard.next();
+    },
+    // Шаг 3: Адрес
+    async (ctx) => {
+        if (!ctx.wizard.state.formData.area) {
+            const area = parseFloat(ctx.message.text);
+            if (isNaN(area)) return ctx.reply('Введите число.');
+            ctx.wizard.state.formData.area = area;
+        }
+        await ctx.reply('🏠 Напишите адрес для выезда замерщика (Улица, дом):');
+        return ctx.wizard.next();
+    },
+    // Шаг 4: Контакт (Кнопка)
+    async (ctx) => {
+        ctx.wizard.state.formData.address = ctx.message.text;
+        await ctx.reply('📞 Нажмите кнопку ниже, чтобы отправить телефон:', {
+            reply_markup: Markup.keyboard([
+                [Markup.button.contactRequest('📱 Отправить мой номер')],
+                ['Пропустить (введу вручную)']
+            ]).oneTime().resize()
+        });
+        return ctx.wizard.next();
+    },
+    // Шаг 5: Финал и отправка
+    async (ctx) => {
+        let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
+        ctx.wizard.state.formData.phone = phone;
+        ctx.wizard.state.formData.source = ctx.session.source || 'organic'; // UTM метка
+
+        const data = ctx.wizard.state.formData;
+        const userId = ctx.from.id;
+        const username = ctx.from.username ? `@${ctx.from.username}` : 'Скрыт';
+
+        // 1. Сообщение Админу/В канал
+        const adminMsg = `
+🆕 <b>НОВАЯ ЗАЯВКА</b>
+
+👤 <b>Клиент:</b> <a href="tg://user?id=${userId}">${ctx.from.first_name}</a> (${username})
+📞 <b>Телефон:</b> <code>${data.phone}</code>
+🛠 <b>Услуга:</b> ${data.service}
+📐 <b>Площадь:</b> ${data.area} м²
+🏠 <b>Адрес:</b> ${data.address}
+💰 <b>Цена (из бота):</b> ${data.priceStr || 'Не рассчитывал'}
+📢 <b>Источник:</b> ${data.source}
+
+#id${userId} #новая
+        `;
+
+        try {
+            // Отправляем админу (если указан ID)
+            if (process.env.ADMIN_ID) {
+                await ctx.telegram.sendMessage(process.env.ADMIN_ID, adminMsg, { parse_mode: 'HTML' });
+            }
+            // Отправляем в канал (если указан ID)
+            if (process.env.ORDER_CHANNEL_ID) {
+                await ctx.telegram.sendMessage(process.env.ORDER_CHANNEL_ID, adminMsg, { parse_mode: 'HTML' });
+            }
+
+            await ctx.reply('✅ <b>Заявка принята!</b>\nМенеджер свяжется с вами в течение 15 минут.', {
+                parse_mode: 'HTML',
+                reply_markup: Markup.removeKeyboard()
+            });
+            // Отправляем главное меню
+            await ctx.reply('Чем еще могу помочь?', getMainMenu());
+        } catch (e) {
+            console.error(e);
+            await ctx.reply('⚠️ Ошибка соединения. Попробуйте позже.');
+        }
+        // Очищаем пре-кальк
+        ctx.session.preCalc = null;
+        return ctx.wizard.leave();
+    }
+);
+
+// Вспомогательная функция выхода
+const leaveScene = async (ctx) => {
+    await ctx.reply('❌ Действие отменено', getMainMenu());
+    return ctx.scene.leave();
+};
+
+// --- ИНИЦИАЛИЗАЦИЯ ---
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const stage = new Scenes.Stage([calcWizard, orderWizard]);
+const app = express();
 const PORT = process.env.PORT || 3000;
 
-if (!BOT_TOKEN) {
-    console.error('Ошибка: Не указан токен бота. Создайте файл .env и добавьте BOT_TOKEN=ваш_токен');
-    process.exit(1);
-}
-
-const bot = new Telegraf(BOT_TOKEN);
-const app = express();
-
-// Файл для хранения заявок
-const REQUESTS_FILE = path.join(__dirname, 'requests.json');
-
-// Функции для работы с заявками
-function loadRequests() {
-    try {
-        if (fs.existsSync(REQUESTS_FILE)) {
-            const data = fs.readFileSync(REQUESTS_FILE, 'utf8');
-            return JSON.parse(data);
-        }
-        return [];
-    } catch (error) {
-        console.error('Ошибка при загрузке заявок:', error);
-        return [];
-    }
-}
-
-function saveRequests(requests) {
-    try {
-        fs.writeFileSync(REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf8');
-    } catch (error) {
-        console.error('Ошибка при сохранении заявок:', error);
-    }
-}
-
-function createRequest(ctx) {
-    const requests = loadRequests();
-    const newRequest = {
-        id: Date.now(),
-        userId: ctx.from.id,
-        userName: ctx.from.username || ctx.from.first_name || 'Не указано',
-        createdAt: new Date().toISOString(),
-        status: 'новая',
-        data: ctx.session.request
-    };
-    requests.push(newRequest);
-    saveRequests(requests);
-    return newRequest;
-}
-
-// Отправка уведомления админу
-async function notifyAdmin(ctx, request) {
-    const ADMIN_ID = process.env.ADMIN_ID;
-    if (!ADMIN_ID) {
-        console.warn('ADMIN_ID не указан в .env файле');
-        return;
-    }
-
-    const createdAt = new Date(request.createdAt).toLocaleString('ru-RU');
-
-    const message = `
-🆕 НОВАЯ ЗАЯВКА #${request.id}
-
-👤 Клиент: ${request.userName}
-🆔 ID клиента: ${request.userId}
-📅 Дата заявки: ${createdAt}
-
-📋 Данные заявки:
-
-🏠 Услуга: ${request.data.service}
-📐 Площадь: ${request.data.area} м²
-📍 Адрес: ${request.data.address}
-👤 Контакты: ${request.data.contacts}
-💬 Комментарий: ${request.data.comment || 'Нет'}
-
-─────────────────────
-
-Статус: ${request.status}
-    `;
-
-    const keyboard = {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '📞 Связаться с клиентом', callback_data: `admin_contact_${request.id}` }
-                ],
-                [
-                    { text: '🔄 В работе', callback_data: `admin_status_progress_${request.id}` },
-                    { text: '✅ Выполнено', callback_data: `admin_status_done_${request.id}` }
-                ],
-                [
-                    { text: '📊 Все заявки', callback_data: 'admin_requests' }
-                ]
-            ]
-        }
-    };
-
-    try {
-        await ctx.telegram.sendMessage(ADMIN_ID, message, keyboard);
-        console.log(`Уведомление отправлено админу (ID: ${ADMIN_ID})`);
-    } catch (error) {
-        console.error('Ошибка при отправке уведомления админу:', error);
-    }
-}
-
-// Сцена оформления заявки
-const requestScene = new Scenes.WizardScene(
-    'request_wizard',
-    // Шаг 1: Выбор услуги
-    (ctx) => {
-        ctx.session.request = {};
-        const serviceKeyboard = {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: 'Натяжные потолки', callback_data: 'req_service_0' },
-                        { text: 'Многоуровневые', callback_data: 'req_service_1' }
-                    ],
-                    [
-                        { text: '3D-потолки', callback_data: 'req_service_2' },
-                        { text: 'Ремонт "под ключ"', callback_data: 'req_service_3' }
-                    ],
-                    [
-                        { text: 'Дизайн интерьеров', callback_data: 'req_service_4' }
-                    ],
-                    [
-                        { text: '❌ Отмена', callback_data: 'req_cancel' }
-                    ]
-                ]
-            }
-        };
-        ctx.reply('📋 Шаг 1 из 5\n\nВыберите услугу:', serviceKeyboard);
-        return ctx.wizard.next();
-    },
-    // Шаг 2: Ввод площади
-    (ctx) => {
-        if (ctx.callbackQuery) {
-            const serviceIndex = parseInt(ctx.callbackQuery.data.split('_')[2]);
-            const services = [
-                'Натяжные потолки',
-                'Многоуровневые потолки',
-                '3D-потолки с фотопечатью',
-                'Ремонт "под ключ"',
-                'Дизайн интерьеров'
-            ];
-            ctx.session.request.service = services[serviceIndex];
-            ctx.answerCbQuery();
-            ctx.reply(`📋 Шаг 2 из 5\n\nВыбранная услуга: ${ctx.session.request.service}\n\nВведите площадь помещения (в м²):`);
-        } else {
-            ctx.reply('Пожалуйста, выберите услугу из предложенного списка.');
-        }
-        return ctx.wizard.next();
-    },
-    // Шаг 3: Ввод адреса
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            const area = ctx.message.text.trim();
-            if (!isNaN(area) && parseFloat(area) > 0) {
-                ctx.session.request.area = parseFloat(area);
-                ctx.reply(`📋 Шаг 3 из 5\n\nПлощадь: ${ctx.session.request.area} м²\n\nВведите адрес для замера:`);
-            } else {
-                ctx.reply('Пожалуйста, введите корректное число (площадь в м²).');
-            }
-        } else {
-            ctx.reply('Пожалуйста, введите площадь числом.');
-        }
-        return ctx.wizard.next();
-    },
-    // Шаг 4: Ввод контактов
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            const address = ctx.message.text.trim();
-            if (address.length > 5) {
-                ctx.session.request.address = address;
-                const contactKeyboard = {
-                    reply_markup: {
-                        keyboard: [
-                            [{ text: '📱 Отправить контакт', request_contact: true }],
-                            [{ text: '✍️ Ввести вручную' }]
-                        ],
-                        resize_keyboard: true,
-                        one_time_keyboard: true
-                    }
-                };
-                ctx.reply(`📋 Шаг 4 из 5\n\nАдрес: ${ctx.session.request.address}\n\nВыберите способ указания контактов:`, contactKeyboard);
-            } else {
-                ctx.reply('Пожалуйста, введите полный адрес (минимум 5 символов).');
-            }
-        }
-        return ctx.wizard.next();
-    },
-    // Шаг 5: Комментарий (опционально)
-    (ctx) => {
-        let contacts;
-
-        if (ctx.message && ctx.message.contact) {
-            // Контакт отправлен через кнопку
-            const contact = ctx.message.contact;
-            contacts = `${contact.first_name || ''} ${contact.last_name || ''}, ${contact.phone_number}`.trim();
-        } else if (ctx.message && ctx.message.text) {
-            // Контакт введён вручную
-            contacts = ctx.message.text.trim();
-            if (contacts.toLowerCase() === 'ввести вручную') {
-                ctx.reply('📋 Шаг 4 из 5 (продолжение)\n\nВведите ваше имя и номер телефона:\nНапример: Иван, +7 (983) 123-45-67');
-                return ctx.wizard.next(); // Ждём ввода контакта вручную
-            }
-        }
-
-        if (contacts && contacts.length > 5) {
-            ctx.session.request.contacts = contacts;
-            const skipKeyboard = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '⏭️ Пропустить', callback_data: 'req_skip_comment' }]
-                    ]
-                }
-            };
-            ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно):`, skipKeyboard);
-            return ctx.wizard.next();
-        }
-
-        ctx.reply('Пожалуйста, отправьте контакт или введите имя и номер телефона.');
-    },
-    // Шаг 5.1: Ввод контакта вручную
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            const contacts = ctx.message.text.trim();
-            if (contacts.length > 5) {
-                ctx.session.request.contacts = contacts;
-                const skipKeyboard = {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '⏭️ Пропустить', callback_data: 'req_skip_comment' }]
-                        ]
-                    }
-                };
-                ctx.reply(`📋 Шаг 5 из 5\n\nКонтакты: ${ctx.session.request.contacts}\n\nДобавьте комментарий к заявке (необязательно):`, skipKeyboard);
-                return ctx.wizard.next();
-            }
-        }
-        ctx.reply('Пожалуйста, введите имя и номер телефона.');
-    },
-    // Подтверждение заявки
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            if (ctx.message.text.toLowerCase() !== 'пропустить') {
-                ctx.session.request.comment = ctx.message.text.trim();
-            }
-
-            const confirmKeyboard = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: '✅ Подтвердить', callback_data: 'req_confirm' },
-                            { text: '❌ Отменить', callback_data: 'req_cancel' }
-                        ],
-                        [
-                            { text: '📝 Изменить', callback_data: 'req_edit' }
-                        ]
-                    ]
-                }
-            };
-
-            let summary = `
-📋 Проверьте данные заявки:
-
-🏠 Услуга: ${ctx.session.request.service}
-📐 Площадь: ${ctx.session.request.area} м²
-📍 Адрес: ${ctx.session.request.address}
-👤 Контакты: ${ctx.session.request.contacts}
-💬 Комментарий: ${ctx.session.request.comment || 'Нет'}
-            `;
-
-            ctx.reply(summary, confirmKeyboard);
-        }
-    }
-);
-
-// Обработка callback для пропуска комментария
-requestScene.action('req_skip_comment', (ctx) => {
-    ctx.session.request.comment = '';
-    ctx.answerCbQuery();
-
-    const confirmKeyboard = {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '✅ Подтвердить', callback_data: 'req_confirm' },
-                    { text: '❌ Отменить', callback_data: 'req_cancel' }
-                ],
-                [
-                    { text: '📝 Изменить', callback_data: 'req_edit' }
-                ]
-            ]
-        }
-    };
-
-    let summary = `
-📋 Проверьте данные заявки:
-
-🏠 Услуга: ${ctx.session.request.service}
-📐 Площадь: ${ctx.session.request.area} м²
-📍 Адрес: ${ctx.session.request.address}
-👤 Контакты: ${ctx.session.request.contacts}
-💬 Комментарий: Нет
-            `;
-
-    ctx.reply(summary, confirmKeyboard);
-    return ctx.wizard.next();
-});
-
-// Обработка callback для подтверждения
-requestScene.action('req_confirm', async (ctx) => {
-    const request = createRequest(ctx);
-    ctx.answerCbQuery();
-
-    ctx.reply('✅ Заявка успешно создана!\n\n' +
-              'Номер заявки: #' + request.id + '\n' +
-              'Статус: новая\n\n' +
-              'Мы свяжемся с вами в ближайшее время для уточнения деталей.\n\n' +
-              'Спасибо за обращение!');
-
-    // Отправляем уведомление админу
-    await notifyAdmin(ctx, request);
-
-    ctx.scene.leave();
-});
-
-// Обработка callback для отмены
-requestScene.action('req_cancel', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply('❌ Заявка отменена.\n\nЕсли у вас возникнут вопросы, вы можете начать оформление заново через главное меню.', mainMenu);
-    ctx.scene.leave();
-});
-
-// Обработка callback для редактирования
-requestScene.action('req_edit', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply('📝 Для изменения заявки начните оформление заново через главное меню.', mainMenu);
-    ctx.scene.leave();
-});
-
-// Обработка callback для услуг
-requestScene.action(/^req_service_\d+/, (ctx) => {
-    const serviceIndex = parseInt(ctx.callbackQuery.data.split('_')[2]);
-    const services = [
-        'Натяжные потолки',
-        'Многоуровневые потолки',
-        '3D-потолки с фотопечатью',
-        'Ремонт "под ключ"',
-        'Дизайн интерьеров'
-    ];
-    ctx.session.request = ctx.session.request || {};
-    ctx.session.request.service = services[serviceIndex];
-
-    ctx.editMessageText(`📋 Шаг 2 из 5\n\nВыбранная услуга: ${ctx.session.request.service}\n\nВведите площадь помещения (в м²):`);
-    return ctx.wizard.selectStep(2);
-});
-
-// Информация о компании
-const companyInfo = {
-    name: 'Потолкоф',
-    fullName: 'Студия натяжных потолков, ремонта и дизайна',
-    slogan: 'Дарим свет и уют вашему дому',
-    stats: {
-        objects: '1200+',
-        clients: '500+',
-        experience: '8',
-        satisfaction: '98%'
-    },
-    contacts: {
-        phone: '+7 (983) 420-88-05',
-        telegram: '@potolkoff2024',
-        vk: 'potolkoff03',
-        instagram: '@potolkoff_03'
-    },
-    services: [
-        { name: 'Натяжные потолки', price: 'от 2000 ₽/м²' },
-        { name: 'Многоуровневые потолки', price: 'от 4500 ₽/м²' },
-        { name: '3D-потолки с фотопечатью', price: 'от 3500 ₽/м²' },
-        { name: 'Потолки с фотообоями', price: 'от 3000 ₽/м²' },
-        { name: 'Тканевые потолки', price: 'от 2500 ₽/м²' },
-        { name: 'Ремонт "под ключ"', price: 'по запросу' },
-        { name: 'Дизайн интерьеров', price: 'по запросу' }
-    ]
-};
-
-// Главное меню (упрощённое)
-const mainMenu = {
-    reply_markup: {
-        inline_keyboard: [
-            [
-                { text: '📏 Заказать замер', callback_data: 'request_call' },
-                { text: '💰 Цены', callback_data: 'prices' }
-            ],
-            [
-                { text: '📞 Контакты', callback_data: 'contacts' },
-                { text: '🏗️ Портфолио', callback_data: 'portfolio' }
-            ]
-        ]
-    }
-};
-
-// Меню контактов
-const contactsMenu = {
-    reply_markup: {
-        inline_keyboard: [
-            [
-                { text: '💬 Telegram', url: `https://t.me/${companyInfo.contacts.telegram.replace('@', '')}` },
-                { text: '📱 VK', url: `https://vk.com/${companyInfo.contacts.vk}` }
-            ],
-            [
-                { text: '📸 Instagram', url: `https://instagram.com/${companyInfo.contacts.instagram}` }
-            ],
-            [
-                { text: '📞 Телефон: +7 (983) 420-88-05', callback_data: 'phone' }
-            ],
-            [
-                { text: '◀️ Назад', callback_data: 'main_menu' }
-            ]
-        ]
-    }
-};
-
-// Сцена калькулятора
-const calculatorWizard = new Scenes.WizardScene(
-    'calculator_wizard',
-    // Шаг 1: Выбор типа потолка
-    (ctx) => {
-        ctx.session.calc = {};
-        const calcKeyboard = {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: 'Натяжные потолки', callback_data: 'calc_ceiling' },
-                        { text: 'Многоуровневые', callback_data: 'calc_multi' }
-                    ],
-                    [
-                        { text: '3D-потолки', callback_data: 'calc_3d' },
-                        { text: 'С фотообоями', callback_data: 'calc_photo' }
-                    ],
-                    [
-                        { text: '❌ Отмена', callback_data: 'calc_cancel' }
-                    ]
-                ]
-            }
-        };
-        ctx.reply('📐 Калькулятор стоимости потолков\n\nВыберите тип потолка:', calcKeyboard);
-        return ctx.wizard.next();
-    },
-    // Шаг 2: Ввод площади
-    (ctx) => {
-        if (ctx.callbackQuery) {
-            const type = ctx.callbackQuery.data.split('_')[1];
-            const types = {
-                'ceiling': { name: 'Натяжные потолки', price: 2000 },
-                'multi': { name: 'Многоуровневые потолки', price: 4500 },
-                '3d': { name: '3D-потолки с фотопечатью', price: 3500 },
-                'photo': { name: 'Потолки с фотообоями', price: 3000 }
-            };
-            ctx.session.calc.type = types[type];
-            ctx.answerCbQuery();
-            ctx.reply(`📐 Шаг 2 из 3\n\nВыбрано: ${ctx.session.calc.type.name}\n\nВведите площадь помещения (в м²):`);
-        } else {
-            ctx.reply('Пожалуйста, выберите тип потолка из предложенного списка.');
-        }
-        return ctx.wizard.next();
-    },
-    // Шаг 3: Результат
-    (ctx) => {
-        if (ctx.message && ctx.message.text) {
-            const area = parseFloat(ctx.message.text.trim());
-            if (!isNaN(area) && area > 0) {
-                ctx.session.calc.area = area;
-                const basePrice = ctx.session.calc.type.price * area;
-                const minPrice = basePrice * 0.9;
-                const maxPrice = basePrice * 1.2;
-
-                const resultKeyboard = {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: '🎯 Оформить заявку', callback_data: 'consultation' },
-                                { text: '📏 Заказать замер', callback_data: 'request_call' }
-                            ],
-                            [
-                                { text: '📊 Все цены', callback_data: 'prices' },
-                                { text: '🏠 Главное меню', callback_data: 'main_menu' }
-                            ]
-                        ]
-                    }
-                };
-
-                const resultMessage = `
-💰 РАСЧЁТ СТОИМОСТИ
-
-─────────────────────
-
-🏠 Тип потолка:
-${ctx.session.calc.type.name}
-
-📐 Площадь помещения:
-${area} м²
-
-💵 Цена за м²:
-${ctx.session.calc.type.price} ₽
-
-─────────────────────
-
-📊 ПРИМЕРНАЯ СТОИМОСТЬ:
-${Math.round(minPrice).toLocaleString('ru-RU')} - ${Math.round(maxPrice).toLocaleString('ru-RU')} ₽
-
-─────────────────────
-
-💡 В стоимость ВХОДИТ:
-✅ Материал потолка
-✅ Установка и монтаж
-✅ Базовая люстра
-
-🔧 ОПЛАЧИВАЕТСЯ ОТДЕЛЬНО:
-❗ Подсветка LED
-❗ Угловые профили
-❗ Дополнительные светильники
-
-─────────────────────
-
-🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
-Закажите бесплатный замер!
-                `;
-
-                ctx.reply(resultMessage, resultKeyboard);
-                ctx.scene.leave();
-            } else {
-                ctx.reply('Пожалуйста, введите корректное число (площадь в м²).');
-            }
-        } else {
-            ctx.reply('Пожалуйста, введите площадь числом.');
-        }
-    }
-);
-
-// Обработка отмены калькулятора
-calculatorWizard.action('calc_cancel', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply('❌ Расчёт отменён.', mainMenu);
-    ctx.scene.leave();
-});
-
-// Обработка выбора типа в калькуляторе
-calculatorWizard.action(/^calc_/, (ctx) => {
-    const type = ctx.callbackQuery.data.split('_')[1];
-    const types = {
-        'ceiling': { name: 'Натяжные потолки', price: 2000 },
-        'multi': { name: 'Многоуровневые потолки', price: 4500 },
-        '3d': { name: '3D-потолки с фотопечатью', price: 3500 },
-        'photo': { name: 'Потолки с фотообоями', price: 3000 }
-    };
-    ctx.session.calc.type = types[type];
-    ctx.editMessageText(`📐 Шаг 2 из 3\n\nВыбрано: ${ctx.session.calc.type.name}\n\nВведите площадь помещения (в м²):`);
-    return ctx.wizard.next();
-});
-
-// Создаем Stage для сцен
-const stage = new Scenes.Stage([requestScene, calculatorWizard]);
-
-// Middleware для сессий
 bot.use(session());
-
-// Подключаем stage
 bot.use(stage.middleware());
 
-// Middleware для автоматического приветствия новых пользователей
-bot.use(async (ctx, next) => {
-    // Проверяем, это ли первый раз когда пользователь пишет боту
-    if (!ctx.session.welcomed && ctx.message && !ctx.message.text.startsWith('/')) {
-        ctx.session.welcomed = true;
-        ctx.reply(welcomeMessage, startMenu);
-        return;
-    }
-    return next();
-});
+// --- ГЛАВНОЕ МЕНЮ (Клавиатура) ---
+function getMainMenu() {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback('🎨 Каталог потолков', 'catalog_start')],
+        [Markup.button.callback('🧮 Калькулятор', 'start_calc'), Markup.button.callback('📝 Заказать замер', 'start_order')],
+        [Markup.button.callback('ℹ️ Контакты', 'info'), Markup.button.callback('💼 Портфолио', 'portfolio')]
+    ]);
+}
 
-// Приветственное сообщение
-const welcomeMessage = `
-✨ Добро пожаловать в мир красивых потолков!
+// --- ОБРАБОТЧИКИ ---
 
-🎨 *Потолкоф* — студия натяжных потолков в Улан-Удэ
-
-${companyInfo.fullName}
-"${companyInfo.slogan}"
-
-─────────────────────
-
-🌟 Почему выбирают нас?
-
-🏆 ${companyInfo.stats.objects}+ выполненных объектов
-⭐ ${companyInfo.stats.clients}+ довольных клиентов
-🔥 ${companyInfo.stats.experience} лет опыта
-💯 ${companyInfo.stats.satisfaction} рекомендаций
-
-─────────────────────
-
-✅ Что мы предлагаем:
-
-🎭 Натяжные потолки — от 2000 ₽/м²
-🏛️ Многоуровневые конструкции — от 4500 ₽/м²
-🖼️ 3D-потолки с фотопечатью — от 3500 ₽/м²
-🏠 Ремонт «под ключ» — по запросу
-🎨 Дизайн интерьеров — по запросу
-
-─────────────────────
-
-🎁 Бесплатные услуги:
-
-📏 Выезд замерщика
-📝 Расчёт стоимости
-💡 Консультация дизайнера
-
-─────────────────────
-
-🕒 Работаем для вас:
-
-Пн-Пт: 9:00 — 18:00
-Сб-Вс: выходной
-
-─────────────────────
-
-📞 Свяжитесь с нами:
-${companyInfo.contacts.phone}
-${companyInfo.contacts.telegram}
-`;
-
-// Меню старта
-const startMenu = {
-    reply_markup: {
-        inline_keyboard: [
-            [
-                { text: '🚀 НАЧАТЬ', callback_data: 'start_now' }
-            ]
-        ]
-    },
-    parse_mode: 'Markdown'
-};
-
-// Запуск бота
+// 1. Старт и UTM
 bot.start((ctx) => {
-    ctx.session.welcomed = true;
-    ctx.reply(welcomeMessage, startMenu);
+    // Сохраняем источник (utm), если есть
+    const payload = ctx.startPayload;
+    if (payload) ctx.session.source = payload;
+
+    ctx.replyWithHTML(
+        `👋 Привет, <b>${ctx.from.first_name}</b>!\n\n` +
+        `Я бот компании <b>Потолкоф</b> 🐾\n` +
+        `Помогу выбрать потолок, рассчитать цену и вызвать мастера.`,
+        getMainMenu()
+    );
 });
 
-// Обработка кнопки НАЧАТЬ
-bot.action('start_now', (ctx) => {
-    ctx.session.welcomed = true;
-    ctx.editMessageText(`
-👋 Добро пожаловать, ${ctx.from.first_name || 'гость'}!
-
-${companyInfo.fullName}
-"${companyInfo.slogan}"
-
-─────────────────────
-
-Что вас интересует? 👇
-`, mainMenu);
-});
-
-// Команда помощи
-bot.help((ctx) => {
-    ctx.reply('🤖 Бот Потолкоф поможет вам:\n' +
-              '• Узнать о наших услугах\n' +
-              '• Связаться с нами\n' +
-              '• Оформить заявку (/request)\n' +
-              '• Посмотреть свои заявки (/myrequests)\n\n' +
-              'Используйте кнопки в меню для навигации.');
-});
-
-// Команда для оформления заявки
-bot.command('request', (ctx) => {
-    ctx.reply('🎯 Оформление заявки\n\nДавайте заполним небольшую форму для получения расчета стоимости и записи на замер.');
-    ctx.scene.enter('request_wizard');
-});
-
-// Команда для просмотра своих заявок
-bot.command('myrequests', (ctx) => {
-    const requests = loadRequests();
-    const userRequests = requests.filter(r => r.userId === ctx.from.id);
-
-    if (userRequests.length === 0) {
-        ctx.reply('📋 У вас пока нет заявок.\n\nОформить заявку: /request');
-        return;
-    }
-
-    let message = '📋 Ваши заявки:\n\n';
-    userRequests.forEach((req, index) => {
-        const date = new Date(req.createdAt).toLocaleDateString('ru-RU');
-        const statusEmoji = req.status === 'новая' ? '🆕' : req.status === 'в работе' ? '🔄' : req.status === 'выполнена' ? '✅' : '❓';
-        message += `${index + 1}. ${statusEmoji} #${req.id}\n`;
-        message += `   📅 ${date}\n`;
-        message += `   🏠 ${req.data.service}\n`;
-        message += `   📍 ${req.data.address}\n`;
-        message += `   Статус: ${req.status}\n\n`;
-    });
-
-    ctx.reply(message);
-});
-
-// --- Админ-команды ---
-
-// Показать контакты клиента
-bot.action(/^admin_contact_\d+$/, (ctx) => {
-    const ADMIN_ID = process.env.ADMIN_ID;
-    if (ctx.from.id.toString() !== ADMIN_ID) {
-        ctx.answerCbQuery('⛔ У вас нет прав для этой команды');
-        return;
-    }
-
-    const requestId = parseInt(ctx.callbackQuery.data.split('_')[2]);
-    const requests = loadRequests();
-    const request = requests.find(r => r.id === requestId);
-
-    if (!request) {
-        ctx.answerCbQuery('❌ Заявка не найдена');
-        return;
-    }
-
-    ctx.answerCbQuery();
-
-    const contactMessage = `
-📞 Контактные данные клиента
-
-Заявка: #${request.id}
-👤 Клиент: ${request.userName}
-🆔 ID: ${request.userId}
-📞 Контакты: ${request.data.contacts}
-📍 Адрес: ${request.data.address}
-
-─────────────────────
-
-Чтобы связаться с клиентом, можете написать ему в Telegram: https://t.me/${request.userName}
-    `;
-
-    ctx.reply(contactMessage, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '💬 Написать в Telegram', url: `https://t.me/${request.userName}` }
-                ]
-            ]
+// 2. Каталог (С картинкой)
+bot.action('catalog_start', async (ctx) => {
+    // ЗАМЕНИ URL НА СВОИ FILE_ID (загрузи фото боту и возьми id)
+    await ctx.replyWithPhoto(
+        'https://via.placeholder.com/800x400.png?text=POTOLKOFF+CATALOG',
+        {
+            caption: '<b>📂 Каталог решений</b>\nВыберите категорию:',
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('✨ Сатиновые', 'cat_satin'), Markup.button.callback('☁️ Матовые', 'cat_matte')],
+                [Markup.button.callback('🪞 Глянцевые', 'cat_gloss'), Markup.button.callback('🧵 Тканевые', 'cat_fabric')],
+                [Markup.button.callback('🔙 В меню', 'back_menu')]
+            ])
         }
+    );
+});
+
+// Обработка кнопок каталога (динамически)
+Object.keys(SERVICES).forEach(key => {
+    bot.action(`cat_${key}`, async (ctx) => {
+        const item = SERVICES[key];
+        await ctx.replyWithPhoto(item.img, {
+            caption: `<b>${item.name}</b>\n\n💵 Цена: от ${item.price} ₽/м²\n\n✅ Идеально ровная поверхность\n✅ Монтаж за 3 часа\n✅ Гарантия 15 лет`,
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('🧮 Рассчитать этот вид', `calc_with_${key}`)],
+                [Markup.button.callback('🔙 К каталогу', 'catalog_start')]
+            ])
+        });
     });
 });
 
-// Изменить статус на "в работе"
-bot.action(/^admin_status_progress_\d+$/, (ctx) => {
-    const ADMIN_ID = process.env.ADMIN_ID;
-    if (ctx.from.id.toString() !== ADMIN_ID) {
-        ctx.answerCbQuery('⛔ У вас нет прав для этой команды');
-        return;
-    }
-
-    const requestId = parseInt(ctx.callbackQuery.data.split('_')[3]);
-    const requests = loadRequests();
-    const request = requests.find(r => r.id === requestId);
-
-    if (!request) {
-        ctx.answerCbQuery('❌ Заявка не найдена');
-        return;
-    }
-
-    request.status = 'в работе';
-    saveRequests(requests);
-
-    ctx.answerCbQuery('✅ Статус изменён на "В работе"');
-
-    // Уведомляем клиента об изменении статуса
-    ctx.telegram.sendMessage(request.userId, `
-🔄 Ваша заявка принята в работу!
-
-Номер заявки: #${request.id}
-Статус: ${request.status}
-
-Мы свяжемся с вами в ближайшее время для уточнения деталей.
-    `);
+// 3. Запуск сцен
+bot.action('start_calc', (ctx) => ctx.scene.enter('CALC_SCENE'));
+bot.action('restart_calc', (ctx) => ctx.scene.enter('CALC_SCENE'));
+bot.action('start_order', (ctx) => ctx.scene.enter('ORDER_SCENE'));
+bot.action('start_order_from_calc', (ctx) => ctx.scene.enter('ORDER_SCENE'));
+bot.action('back_menu', (ctx) => {
+    ctx.deleteMessage(); // Удаляем старое
+    ctx.reply('Главное меню:', getMainMenu());
 });
 
-// Изменить статус на "выполнено"
-bot.action(/^admin_status_done_\d+$/, (ctx) => {
-    const ADMIN_ID = process.env.ADMIN_ID;
-    if (ctx.from.id.toString() !== ADMIN_ID) {
-        ctx.answerCbQuery('⛔ У вас нет прав для этой команды');
-        return;
-    }
-
-    const requestId = parseInt(ctx.callbackQuery.data.split('_')[3]);
-    const requests = loadRequests();
-    const request = requests.find(r => r.id === requestId);
-
-    if (!request) {
-        ctx.answerCbQuery('❌ Заявка не найдена');
-        return;
-    }
-
-    request.status = 'выполнена';
-    saveRequests(requests);
-
-    ctx.answerCbQuery('✅ Статус изменён на "Выполнено"');
-
-    // Уведомляем клиента об изменении статуса
-    ctx.telegram.sendMessage(request.userId, `
-✅ Ваша заявка выполнена!
-
-Номер заявки: #${request.id}
-Статус: ${request.status}
-
-Благодарим за сотрудничество! Если у вас есть ещё вопросы, мы всегда на связи.
-    `);
+// 4. Контакты
+bot.action('info', (ctx) => {
+    ctx.replyWithHTML(
+        `<b>📞 Контакты Потолкоф</b>\n\n` +
+        `📱 Телефон: +7 (983) 420-88-05\n` +
+        `💬 Telegram: @potolkoff2024\n` +
+        `🌐 VK: vk.com/potolkoff03\n` +
+        `📸 Instagram: @potolkoff_03\n\n` +
+        `🕒 Режим работы:\nПн-Пт: 9:00 - 18:00\nСб-Вс: выходной\n` +
+        `📍 Улан-Удэ и Бурятия`,
+        Markup.inlineKeyboard([
+            [Markup.button.url('💬 Написать в Telegram', 'https://t.me/potolkoff2024')],
+            [Markup.button.callback('🔙 В меню', 'back_menu')]
+        ])
+    );
 });
 
-// Показать все заявки (только админу)
-bot.action('admin_requests', (ctx) => {
-    const ADMIN_ID = process.env.ADMIN_ID;
-    if (ctx.from.id.toString() !== ADMIN_ID) {
-        ctx.answerCbQuery('⛔ У вас нет прав для этой команды');
-        return;
-    }
-
-    ctx.answerCbQuery();
-
-    const requests = loadRequests();
-
-    if (requests.length === 0) {
-        ctx.reply('📋 Заявок пока нет.');
-        return;
-    }
-
-    // Сортируем по дате (новые сверху)
-    requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    let message = '📋 Все заявки:\n\n';
-    requests.forEach((req, index) => {
-        const date = new Date(req.createdAt).toLocaleDateString('ru-RU');
-        const statusEmoji = req.status === 'новая' ? '🆕' : req.status === 'в работе' ? '🔄' : req.status === 'выполнена' ? '✅' : '❓';
-        message += `${index + 1}. ${statusEmoji} #${req.id}\n`;
-        message += `   📅 ${date}\n`;
-        message += `   👤 ${req.userName} (ID: ${req.userId})\n`;
-        message += `   🏠 ${req.data.service}\n`;
-        message += `   📍 ${req.data.address}\n`;
-        message += `   Статус: ${req.status}\n\n`;
-    });
-
-    ctx.reply(message);
-});
-
-// Обработка текстовых сообщений
-bot.on('text', (ctx) => {
-    const text = ctx.message.text.toLowerCase();
-
-    if (text.includes('привет') || text.includes('здравствуй')) {
-        ctx.reply('Здравствуйте! Добро пожаловать в студию Потолкоф! 🎉\n\n' +
-                  'Я могу рассказать вам о наших услугах и помочь связаться с нами.',
-                  mainMenu);
-    } else if (text.includes('услуг') || text.includes('работ') || text.includes('цена')) {
-        ctx.reply('Вот список наших основных услуг:', mainMenu);
-    } else if (text.includes('контакт') || text.includes('телефон') || text.includes('связ')) {
-        ctx.reply('Наши контактные данные:', contactsMenu);
-    } else {
-        ctx.reply('Спасибо за сообщение! Вот главное меню:', mainMenu);
-    }
-});
-
-// Обработка инлайн-кнопок
-bot.action('main_menu', (ctx) => {
-    ctx.editMessageText(welcomeMessage, mainMenu);
-});
-
-// Калькулятор стоимости (не используется в главном меню)
-bot.action('calculator', (ctx) => {
-    ctx.scene.enter('calculator_wizard');
-});
-
-// Цены
-bot.action('prices', (ctx) => {
-    let pricesMessage = `
-💰 ЦЕНЫ НА УСЛУГИ
-
-─────────────────────
-    `;
-
-    companyInfo.services.forEach((service, index) => {
-        pricesMessage += `${index + 1}. <b>${service.name}</b>\n   ${service.price}\n\n`;
-    });
-
-    pricesMessage += `
-─────────────────────
-
-💡 Итоговая стоимость зависит от:
-📐 Площади помещения
-🎨 Сложности работ
-🏗️ Выбранных материалов
-
-─────────────────────
-
-🎁 ХОТИТЕ ТОЧНЫЙ РАСЧЁТ?
-Оформите заявку для получения точного расчёта!
-    `;
-
-    ctx.editMessageText(pricesMessage, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '📏 Заказать замер', callback_data: 'request_call' },
-                    { text: '◀️ Назад', callback_data: 'main_menu' }
-                ]
-            ]
-        }
-    });
-});
-
-// Заказать замер
-bot.action('request_call', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.scene.enter('request_wizard');
-});
-
-// Портфолио
+// 5. Портфолио
 bot.action('portfolio', (ctx) => {
-    const portfolioMessage = `
-🏗️ ПОРТФОЛИО НАШИХ РАБОТ
+    ctx.replyWithHTML(
+        `<b>🏗️ Портфолио наших работ</b>\n\n` +
+        `✨ Выполнено более 1200 объектов!\n\n` +
+        `🎨 Что мы делаем:\n` +
+        `• Натяжные потолки в квартирах и домах\n` +
+        `• Многоуровневые конструкции с подсветкой\n` +
+        `• 3D-потолки с фотопечатью\n` +
+        `• Комплексный ремонт под ключ\n\n` +
+        `📊 Статистика:\n` +
+        `• 1200+ выполненных объектов\n` +
+        `• 500+ довольных клиентов\n` +
+        `• 8 лет на рынке\n` +
+        `• 98% рекомендаций`,
+        Markup.inlineKeyboard([
+            [Markup.button.url('📸 Фото работ', 'https://vk.com/potolkoff03')],
+            [Markup.button.url('🎥 Видеообзоры', 'https://t.me/potolkoff2024')],
+            [Markup.button.url('💬 Отзывы', 'https://vk.com/topic-172808215_48667766')],
+            [Markup.button.callback('🔙 В меню', 'back_menu')]
+        ])
+    );
+});
 
-─────────────────────
+// 6. Админ-функция: Ответ пользователю (Reply)
+bot.on('text', async (ctx) => {
+    // Проверка: сообщение от админа и это ответ (reply)
+    if (ctx.from.id == process.env.ADMIN_ID && ctx.message.reply_to_message) {
+        const replyText = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption;
+        if (!replyText) return;
 
-📸 Выполнено более ${companyInfo.stats.objects} объектов!
-
-─────────────────────
-
-🎨 НАШИ РАБОТЫ:
-• Натяжные потолки в квартирах и домах
-• Многоуровневые конструкции с подсветкой
-• 3D-потолки с фотопечатью
-• Комплексный ремонт под ключ
-
-─────────────────────
-
-📊 СТАТИСТИКА:
-• ${companyInfo.stats.objects}+ выполненных объектов
-• ${companyInfo.stats.clients}+ довольных клиентов
-• ${companyInfo.stats.experience} лет опыта
-• ${companyInfo.stats.satisfaction} рекомендаций
-
-─────────────────────
-
-💼 ХОТИТЕ УВИДЕТЬ ПРИМЕРЫ?
-Выберите категорию ниже ⬇️
-    `;
-
-    ctx.editMessageText(portfolioMessage, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '📸 Фото работ', url: 'https://vk.com/potolkoff03' },
-                    { text: '🎥 Видеообзоры', url: 'https://t.me/potolkoff2024' }
-                ],
-                [
-                    { text: '💬 Отзывы клиентов', url: 'https://vk.com/topic-172808215_48667766' }
-                ],
-                [
-                    { text: '◀️ Назад', callback_data: 'main_menu' }
-                ]
-            ]
+        // Ищем #id123456 в тексте оригинального сообщения
+        const match = replyText.match(/#id(\d+)/);
+        if (match) {
+            const userId = match[1];
+            try {
+                await ctx.telegram.sendMessage(userId, `👨‍💼 <b>Сообщение от менеджера:</b>\n\n${ctx.message.text}`, { parse_mode: 'HTML' });
+                await ctx.reply('✅ Сообщение отправлено клиенту.');
+            } catch (e) {
+                await ctx.reply('❌ Не удалось отправить. Возможно, бот заблокирован.');
+            }
+        } else {
+            await ctx.reply('⚠️ Не нашел ID пользователя в сообщении (ищу тег #id...)');
         }
-    });
+    }
 });
 
-bot.action('contacts', (ctx) => {
-    const contactMessage = `
-📞 НАШИ КОНТАКТЫ
+// 7. Калькулятор из каталога (добавим для полноты)
+bot.action(/^calc_with_(.+)$/, async (ctx) => {
+    const typeKey = ctx.match[1];
+    const service = SERVICES[typeKey];
 
-─────────────────────
-
-💬 Telegram:
-${companyInfo.contacts.telegram}
-
-📱 VK:
-vk.com/${companyInfo.contacts.vk}
-
-📸 Instagram:
-${companyInfo.contacts.instagram}
-
-─────────────────────
-
-🕒 РАБОЧЕЕ ВРЕМЯ:
-Пн-Пт: 9:00 - 18:00
-Сб-Вс: выходной
-
-─────────────────────
-
-📞 НУЖЕН ЗВОНОК?
-Нажмите кнопку ниже ⬇️
-    `;
-    ctx.editMessageText(contactMessage, contactsMenu);
+    // Сохраняем выбор и запускаем калькулятор с 2 шага
+    ctx.session.preCalc = { service: service.name };
+    await ctx.answerCbQuery();
+    await ctx.reply(`✅ Выбрано: ${service.name}`);
+    await ctx.reply('📐 <b>Шаг 2/3:</b> Введите площадь помещения (м²):', { parse_mode: 'HTML' });
+    ctx.scene.enter('CALC_SCENE');
 });
 
-// Обработчик телефона с кнопками "Написать в Telegram" и "Поделиться"
-bot.action('phone', (ctx) => {
-    ctx.answerCbQuery();
-
-    const phoneNumber = '+7 (983) 420-88-05';
-    const sharePhone = phoneNumber.replace(/\s/g, '').replace(/\(/g, '').replace(/\)/g, '');
-    const shareText = encodeURIComponent('Здравствуйте, это Потолкоф!');
-    const shareUrl = 'https://t.me/share?url=' + sharePhone + '&text=' + shareText;
-    const telegramUrl = 'https://t.me/potolkoff2024';
-
-    ctx.reply(
-`📞 НАШ ТЕЛЕФОН
-
-─────────────────────
-
-${phoneNumber}
-
-─────────────────────
-
-🕒 РАБОЧЕЕ ВРЕМЯ:
-Пн-Пт: 9:00 - 18:00
-Сб-Вс: выходной
-
-─────────────────────
-
-💡 Если мы не ответили - напишите нам в Telegram!
-    `, {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '💬 Написать в Telegram', url: telegramUrl },
-                    { text: '📤 Поделиться', url: shareUrl }
-                ],
-                [
-                    { text: '◀️ Назад', callback_data: 'main_menu' }
-                ]
-            ]
-        }
-    });
-});
-
-bot.action('consultation', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.reply('🎯 Оформление заявки\n\nДавайте заполним небольшую форму для получения расчета стоимости и записи на замер.');
-    ctx.scene.enter('request_wizard');
+// Exit from calculator
+bot.action('exit_calc', (ctx) => {
+    ctx.session.preCalc = null;
+    ctx.reply('Главное меню:', getMainMenu());
 });
 
 // ============================================
@@ -1097,10 +402,5 @@ app.listen(PORT, async () => {
 });
 
 // Graceful shutdown
-process.once('SIGINT', () => {
-    bot.stop('SIGINT');
-});
-
-process.once('SIGTERM', () => {
-    bot.stop('SIGTERM');
-});
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
